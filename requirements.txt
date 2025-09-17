@@ -1,0 +1,77 @@
+# Project Poseidon - Requirements
+# 基于CLIP变体与迭代模仿学习的视觉-触觉融合机器人操控系统
+
+# Core Deep Learning Framework
+torch>=2.0.0
+torchvision>=0.15.0
+torchaudio>=2.0.0
+
+# Computer Vision Models
+timm>=0.9.0                    # PyTorch Image Models (for ViT)
+opencv-python>=4.8.0           # Computer Vision Library
+pillow>=9.5.0                  # Image Processing
+
+# Scientific Computing
+numpy>=1.24.0                  # Numerical Computing
+scipy>=1.10.0                  # Scientific Computing
+scikit-learn>=1.3.0            # Machine Learning Utilities
+
+# Data Processing
+pandas>=2.0.0                  # Data Analysis
+h5py>=3.8.0                    # HDF5 File Format
+imageio>=2.31.0                # Image I/O
+
+# Training & Logging
+tensorboard>=2.13.0            # TensorBoard for Visualization
+wandb>=0.15.0                  # Weights & Biases (optional)
+tqdm>=4.65.0                   # Progress Bars
+pyyaml>=6.0                    # YAML Configuration Files
+
+# Robotics (Optional - install based on your robot platform)
+# rospy                        # ROS Python Client (if using ROS)
+# geometry_msgs                # ROS Geometry Messages
+# sensor_msgs                  # ROS Sensor Messages
+# std_msgs                     # ROS Standard Messages
+
+# Serial Communication (for tactile sensors)
+pyserial>=3.5                  # Serial Port Communication
+
+# Utilities
+matplotlib>=3.7.0              # Plotting
+seaborn>=0.12.0                # Statistical Visualization
+jupyter>=1.0.0                 # Jupyter Notebook
+ipython>=8.12.0                # Enhanced Python Shell
+
+# Development Tools
+black>=23.0.0                  # Code Formatting
+flake8>=6.0.0                  # Code Linting
+pytest>=7.4.0                 # Testing Framework
+pre-commit>=3.3.0              # Git Hooks
+
+# Optional: Advanced Features
+# faiss-gpu>=1.7.4             # Efficient Similarity Search (GPU)
+# faiss-cpu>=1.7.4             # Efficient Similarity Search (CPU)
+# albumentations>=1.3.0        # Advanced Image Augmentation
+# kornia>=0.7.0                # Differentiable Computer Vision
+
+# System Dependencies (install via system package manager)
+# For Ubuntu/Debian:
+# sudo apt-get install python3-dev python3-pip
+# sudo apt-get install libopencv-dev python3-opencv
+# sudo apt-get install libeigen3-dev
+# sudo apt-get install libpcl-dev (for point cloud processing)
+
+# For macOS:
+# brew install opencv
+# brew install eigen
+# brew install pcl
+
+# CUDA Support (if using GPU)
+# Make sure to install CUDA toolkit and cuDNN
+# Visit: https://pytorch.org/get-started/locally/ for installation instructions
+
+# Notes:
+# 1. Install PyTorch with CUDA support for GPU acceleration
+# 2. For ROS integration, install ROS Noetic/Melodic separately
+# 3. For production deployment, consider using Docker containers
+# 4. Some packages may require compilation from source for optimal performance

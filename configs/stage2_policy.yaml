@@ -1,0 +1,129 @@
+# Stage 2: Dynamic Policy Learning Configuration
+# 动态策略学习阶段配置文件
+
+# 数据参数
+data_params:
+  dataset_path: "data/policy_dataset"  # 策略学习数据集路径
+  trajectory_length: 50  # 轨迹长度
+  batch_size: 32
+  num_workers: 4
+  pin_memory: true
+  
+# 模型参数
+model_params:
+  # 表征模型参数（冻结使用）
+  representation_model:
+    weights_path: "checkpoints/stage1_representation/best_model.pth"
+    freeze: true  # 冻结表征模型
+    
+  # 策略模型参数
+  policy_model:
+    # 状态向量维度
+    state_dim: 899  # 768(vision) + 768(tactile) + 3(3D coordinates) = 1539
+    # LSTM参数
+    lstm_hidden_dim: 512
+    lstm_num_layers: 2
+    lstm_dropout: 0.1
+    # 输出动作维度
+    action_dim: 6  # 机器人6DOF动作
+    # MLP参数
+    mlp_hidden_dims: [256, 128]
+    mlp_dropout: 0.1
+    
+# DAgger训练参数
+dagger_params:
+  # DAgger迭代参数
+  max_iterations: 10  # 最大迭代次数
+  episodes_per_iteration: 50  # 每次迭代收集的episode数
+  expert_data_ratio: 0.5  # 专家数据在总数据中的比例
+  
+  # 初始训练参数
+  initial_epochs: 50  # 初始模型训练epoch数
+  iteration_epochs: 30  # 每次迭代训练epoch数
+  
+  # 数据收集参数
+  max_episode_length: 100  # 最大episode长度
+  success_threshold: 0.8  # 成功阈值
+  
+# 训练参数
+training_params:
+  learning_rate: 1e-3
+  weight_decay: 0.001
+  optimizer: "adam"
+  grad_clip_norm: 1.0  # 梯度裁剪
+  
+# 损失函数参数
+loss_params:
+  type: "mse"  # 均方误差损失
+  action_weight: 1.0
+  regularization_weight: 0.01
+  
+# 学习率调度器参数
+scheduler_params:
+  type: "step"
+  step_size: 20
+  gamma: 0.8
+  
+# 机器人环境参数
+robot_params:
+  # 机器人接口参数
+  interface_type: "ros"  # ROS接口
+  control_frequency: 100  # 控制频率(Hz)
+  
+  # 任务参数
+  task_type: "screw_tightening"  # 拧螺丝任务
+  workspace_bounds: [-0.5, 0.5, -0.5, 0.5, 0.0, 1.0]  # 工作空间边界[x_min, x_max, y_min, y_max, z_min, z_max]
+  
+  # 安全参数
+  force_limit: 50.0  # 最大力限制(N)
+  velocity_limit: 0.1  # 最大速度限制(m/s)
+  
+# 数据同步参数
+sync_params:
+  # 时间戳同步
+  timestamp_precision: 1e-6  # 时间戳精度(μs)
+  sync_tolerance: 1e-3  # 同步容差(ms)
+  
+  # 传感器同步
+  vision_frequency: 30  # 视觉传感器频率(Hz)
+  tactile_frequency: 1000  # 触觉传感器频率(Hz)
+  
+# 几何特征计算参数
+geometry_params:
+  # 立体匹配参数
+  stereo_matching:
+    algorithm: "sgbm"  # 半全局块匹配
+    min_disparity: 0
+    num_disparities: 64
+    block_size: 11
+    
+  # 相机参数
+  camera_params:
+    baseline: 0.12  # 基线距离(m)
+    focal_length: 800  # 焦距(pixels)
+    cx: 320  # 主点x坐标
+    cy: 240  # 主点y坐标
+    
+# 检查点参数
+checkpoint_params:
+  output_dir: "checkpoints/stage2_policy"
+  save_freq: 10
+  save_best: true
+  save_dagger_iterations: true  # 保存每次DAgger迭代的模型
+  
+# 日志参数
+logging_params:
+  log_freq: 5
+  tensorboard_dir: "logs/stage2_policy"
+  save_trajectories: true  # 保存轨迹数据用于分析
+  
+# 评估参数
+evaluation_params:
+  eval_freq: 5
+  eval_episodes: 20  # 评估episode数
+  metrics: ["success_rate", "completion_time", "force_profile", "trajectory_smoothness"]
+  
+# 设备参数
+device_params:
+  use_cuda: true
+  mixed_precision: false  # 策略学习阶段不使用混合精度，保证数值稳定性
