@@ -27,7 +27,7 @@ from data_loader.augmentations import get_vision_transforms, get_tactile_transfo
 from data_loader.samplers import BalancedBatchSampler
 from engine.trainer import train_representation_epoch
 from engine.evaluator import evaluate_representation_epoch
-from engine.losses import InfoNCELoss
+from engine.losses import InfoNCELoss, HybridLoss
 
 
 def setup_logging(log_dir: str) -> logging.Logger:
@@ -248,14 +248,19 @@ def create_optimizer_and_scheduler(model: nn.Module, config: dict) -> tuple:
 
 
 def create_loss_function(config: dict, device: torch.device) -> nn.Module:
-    """创建损失函数"""
+    """创建损失函数（支持HybridLoss）"""
     loss_config = config['loss_params']
-    
-    # 创建InfoNCE损失
-    loss_fn = InfoNCELoss(
-        temperature=loss_config.get('temperature', 0.07),
-        reduction='mean'
-    )
+    multi_task_cfg = config.get('multi_task_params', None)
+
+    if multi_task_cfg is not None:
+        alpha = float(multi_task_cfg.get('alpha', 0.5))
+        temperature = float(loss_config.get('temperature', 0.07))
+        loss_fn = HybridLoss(alpha=alpha, temperature=temperature)
+    else:
+        loss_fn = InfoNCELoss(
+            temperature=loss_config.get('temperature', 0.07),
+            reduction='mean'
+        )
     
     return loss_fn.to(device)
 

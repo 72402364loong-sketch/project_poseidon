@@ -109,6 +109,16 @@ class RepresentationModel(nn.Module):
         
         # 初始化投影头权重
         self._init_projection_heads()
+
+        # 视觉->触觉预测头（新增）：从视觉特征预测完整触觉序列
+        # 输入维度与视觉编码器特征维度一致，输出为 (seq_len * feature_dim)
+        self.tactile_prediction_head = nn.Sequential(
+            nn.Linear(self.vision_encoder.feature_dim, projection_hidden_dim),
+            nn.ReLU(inplace=True),
+            nn.Linear(projection_hidden_dim, tactile_seq_len * tactile_feature_dim)
+        )
+        self.tactile_seq_len = tactile_seq_len
+        self.tactile_feature_dim = tactile_feature_dim
     
     def _load_vision_encoder_weights(self, weights_path: str) -> None:
         """
@@ -196,10 +206,20 @@ class RepresentationModel(nn.Module):
         vision_embedding = self.vision_projection_head(vision_features)  # (N, embed_dim)
         tactile_embedding = self.tactile_projection_head(tactile_features)  # (N, embed_dim)
         
+        # 从视觉特征预测触觉序列（新增）
+        predicted_tactile_flat = self.tactile_prediction_head(vision_features)
+        predicted_tactile_sequence = predicted_tactile_flat.view(
+            -1, self.tactile_seq_len, self.tactile_feature_dim
+        )
+
         if return_features:
-            return (vision_embedding, tactile_embedding), (vision_features, tactile_features)
+            return (
+                vision_embedding, 
+                tactile_embedding, 
+                predicted_tactile_sequence
+            ), (vision_features, tactile_features)
         else:
-            return vision_embedding, tactile_embedding
+            return vision_embedding, tactile_embedding, predicted_tactile_sequence
     
     def encode_vision(self, image: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """

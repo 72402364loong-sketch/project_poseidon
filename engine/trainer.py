@@ -281,16 +281,31 @@ def train_representation_epoch(
     def custom_forward_fn(model, batch_data):
         if isinstance(batch_data, (list, tuple)) and len(batch_data) >= 2:
             vision_data, tactile_data = batch_data[0], batch_data[1]
-            vision_embedding, tactile_embedding = model(vision_data, tactile_data)
-            return vision_embedding, tactile_embedding
+            # 返回四元组，包含触觉GT，供自定义损失函数使用
+            vision_emb, tactile_emb, pred_tactile = model(vision_data, tactile_data)
+            return vision_emb, tactile_emb, pred_tactile, tactile_data
         else:
             raise ValueError("Expected batch_data to contain vision and tactile data")
-    
+
+    # 自定义损失计算以支持HybridLoss(四个输入)或InfoNCE(两个输入)
+    original_loss_fn = loss_fn
+
+    def custom_loss_fn(model_output, **loss_kwargs):
+        if isinstance(model_output, (list, tuple)):
+            if len(model_output) == 4:
+                v_emb, t_emb, pred_tactile, tactile_gt = model_output
+                return original_loss_fn(v_emb, t_emb, pred_tactile, tactile_gt)
+            elif len(model_output) == 2:
+                v_emb, t_emb = model_output
+                return original_loss_fn(v_emb, t_emb)
+        # 回退：直接传入
+        return original_loss_fn(model_output)
+
     return train_one_epoch(
         model=model,
         data_loader=data_loader,
         optimizer=optimizer,
-        loss_fn=loss_fn,
+        loss_fn=custom_loss_fn,
         device=device,
         epoch=epoch,
         custom_forward_fn=custom_forward_fn,

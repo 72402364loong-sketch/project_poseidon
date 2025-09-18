@@ -45,6 +45,12 @@ training_params:
 loss_params:
   type: "infonce"
   temperature: 0.07  # 温度系数τ
+
+# 多任务训练参数（新增）
+multi_task_params:
+  # InfoNCE损失权重，MSE预测损失权重为 (1 - alpha)
+  # alpha = 1.0 等同纯对比学习；alpha = 0.0 等同纯预测
+  alpha: 0.5
   
 # 学习率调度器参数
 scheduler_params:
