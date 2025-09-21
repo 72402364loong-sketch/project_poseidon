@@ -499,3 +499,94 @@ def evaluate_policy_epoch(
         custom_forward_fn=custom_forward_fn,
         **kwargs
     )
+
+
+def evaluate_classification_epoch(
+    representation_model: nn.Module,
+    classifier: nn.Module,
+    data_loader: DataLoader,
+    loss_fn: nn.Module,
+    device: torch.device,
+    epoch: int,
+    logger: Optional[logging.Logger] = None
+) -> Dict[str, float]:
+    """
+    分类任务专用的评估函数
+    """
+    representation_model.eval()
+    classifier.eval()
+    
+    total_loss = 0.0
+    total_samples = 0
+    all_predictions = []
+    all_labels = []
+    
+    with torch.no_grad():
+        for batch_idx, batch_data in enumerate(data_loader):
+            # 数据移动到设备
+            vision_data, tactile_data, labels = batch_data
+            vision_data = vision_data.to(device)
+            tactile_data = tactile_data.to(device)
+            labels = labels.to(device)
+            
+            batch_size = vision_data.shape[0]
+            
+            # 前向传播
+            with torch.cuda.amp.autocast():
+                # 使用表征模型提取特征
+                vision_emb, tactile_emb, _ = representation_model(vision_data, tactile_data)
+                
+                # 拼接特征
+                features = torch.cat([vision_emb, tactile_emb], dim=1)
+                
+                # 分类
+                logits = classifier(features)
+                
+                # 计算损失
+                loss = loss_fn(logits, labels)
+            
+            # 更新统计信息
+            total_loss += loss.item() * batch_size
+            total_samples += batch_size
+            
+            # 收集预测结果
+            predictions = torch.argmax(logits, dim=1)
+            all_predictions.extend(predictions.cpu().numpy())
+            all_labels.extend(labels.cpu().numpy())
+    
+    # 计算指标
+    from sklearn.metrics import accuracy_score, precision_recall_fscore_support, confusion_matrix
+    
+    accuracy = accuracy_score(all_labels, all_predictions)
+    precision, recall, f1, _ = precision_recall_fscore_support(
+        all_labels, all_predictions, average='weighted', zero_division=0
+    )
+    
+    avg_loss = total_loss / total_samples
+    
+    results = {
+        'epoch': epoch,
+        'average_loss': avg_loss,
+        'accuracy': accuracy,
+        'precision': precision,
+        'recall': recall,
+        'f1': f1,
+        'total_samples': total_samples
+    }
+    
+    # 打印评估总结
+    summary_msg = (
+        f'Eval {epoch:3d} Summary: '
+        f'Loss: {avg_loss:.4f} | '
+        f'Acc: {accuracy:.4f} | '
+        f'Prec: {precision:.4f} | '
+        f'Rec: {recall:.4f} | '
+        f'F1: {f1:.4f}'
+    )
+    
+    if logger:
+        logger.info(summary_msg)
+    else:
+        print(summary_msg)
+    
+    return results

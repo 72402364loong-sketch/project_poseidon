@@ -19,7 +19,7 @@ from typing import Dict, List, Any, Optional
 # 添加项目根目录到Python路径
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from models.representation_model import RepresentationModel
+from models.representation_model import HybridRepresentationModel
 from models.policy_model import PolicyModel
 from robot.interface import RobotInterface, VisionSensor, TactileSensor, RobotCommand, SensorData
 from data_loader.utils import calculate_target_3d_coordinates
@@ -58,7 +58,7 @@ def load_models(config: dict, device: torch.device) -> tuple:
     
     # 加载表征模型
     rep_model_path = config['model_paths']['representation_model']
-    representation_model = RepresentationModel()
+    representation_model = HybridRepresentationModel()
     
     if os.path.exists(rep_model_path):
         checkpoint = torch.load(rep_model_path, map_location=device)
@@ -142,7 +142,7 @@ def create_robot_interface(config: dict) -> RobotInterface:
 
 def process_sensor_data(
     sensor_data: Dict[str, SensorData],
-    representation_model: RepresentationModel,
+    representation_model: HybridRepresentationModel,
     device: torch.device,
     config: dict
 ) -> Optional[torch.Tensor]:
@@ -242,7 +242,7 @@ def process_sensor_data(
 
 def execute_task(
     robot_interface: RobotInterface,
-    representation_model: RepresentationModel,
+    representation_model: HybridRepresentationModel,
     policy_model: PolicyModel,
     config: dict,
     device: torch.device,

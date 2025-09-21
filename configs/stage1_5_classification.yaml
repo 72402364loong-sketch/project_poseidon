@@ -1,0 +1,57 @@
+# Stage 1.5: Multimodal Object Classification Configuration
+# 阶段1.5：多模态对象分类配置文件
+
+# 数据参数
+data_params:
+  dataset_path: "data/representation_dataset"  # 与阶段1相同的数据集路径
+  train_split: 0.8
+  val_split: 0.2
+  batch_size: 64
+  num_workers: 8
+  pin_memory: true
+  num_classes: 15  # 十数个物体类别，可根据实际情况调整
+
+# 模型参数
+model_params:
+  # 阶段1训练好的表征模型路径
+  representation_model_checkpoint: "checkpoints/stage1_representation/best_model.pth"
+  
+  # 分类器参数
+  classifier_hidden_dim: 512
+  feature_dim: 1536  # 768 (vision) + 768 (tactile) = 1536
+  dropout: 0.2
+
+# 训练参数
+training_params:
+  epochs: 30
+  learning_rate: 0.001
+  weight_decay: 0.01
+  optimizer: "adamw"
+  warmup_epochs: 5
+
+# 学习率调度器参数
+scheduler_params:
+  type: "cosine"
+  T_max: 30
+  eta_min: 1e-6
+
+# 检查点参数
+checkpoint_params:
+  output_dir: "checkpoints/stage1_5_classifier"
+  save_freq: 10
+  save_best: true
+
+# 日志参数
+logging_params:
+  log_freq: 10
+  tensorboard_dir: "logs/stage1_5_classifier"
+
+# 评估参数
+evaluation_params:
+  eval_freq: 5  # 每5个epoch评估一次
+  metrics: ["loss", "accuracy", "precision", "recall", "f1"]
+
+# 设备参数
+device_params:
+  use_cuda: true
+  mixed_precision: true

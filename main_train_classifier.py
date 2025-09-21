@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Stage 1: Multimodal Representation Learning
-阶段1：多模态表征学习的主训练脚本
+Stage 1.5: Multimodal Object Classification
+阶段1.5：多模态对象分类的主训练脚本
 """
 
 import os
@@ -17,17 +17,17 @@ import numpy as np
 import random
 import logging
 from datetime import datetime
+from sklearn.metrics import accuracy_score, precision_recall_fscore_support, confusion_matrix
 
 # 添加项目根目录到Python路径
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from models.representation_model import HybridRepresentationModel
-from data_loader.dataset import RepresentationDataset
+from models.classifier import ObjectClassifier
+from data_loader.dataset import ClassificationDataset
 from data_loader.augmentations import get_vision_transforms, get_tactile_transforms
-from data_loader.samplers import BalancedBatchSampler
-from engine.trainer import train_representation_epoch
-from engine.evaluator import evaluate_representation_epoch
-from engine.losses import InfoNCELoss, HybridLoss
+from engine.trainer import train_one_epoch
+from engine.evaluator import evaluate_classification_epoch
 
 
 def setup_logging(log_dir: str) -> logging.Logger:
@@ -36,7 +36,7 @@ def setup_logging(log_dir: str) -> logging.Logger:
     
     # 创建日志文件名
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_file = os.path.join(log_dir, f"stage1_representation_{timestamp}.log")
+    log_file = os.path.join(log_dir, f"stage1_5_classification_{timestamp}.log")
     
     # 配置日志
     logging.basicConfig(
@@ -78,7 +78,7 @@ def create_datasets(config: dict) -> tuple:
     train_vision_transforms = get_vision_transforms(
         config=aug_config.get('vision', {}),
         is_training=True,
-        underwater_augmentation=False  # 在表征学习阶段不使用水下增强
+        underwater_augmentation=False
     )
     
     val_vision_transforms = get_vision_transforms(
@@ -99,22 +99,24 @@ def create_datasets(config: dict) -> tuple:
     )
     
     # 创建数据集
-    train_dataset = RepresentationDataset(
+    train_dataset = ClassificationDataset(
         data_path=data_config['dataset_path'],
         split='train',
         vision_transform=train_vision_transforms,
         tactile_transform=train_tactile_transforms,
-        tactile_seq_len=config['model_params']['tactile_encoder']['seq_len'],
-        stereo_mode=True
+        tactile_seq_len=100,  # 默认值，可根据需要调整
+        stereo_mode=True,
+        num_classes=data_config['num_classes']
     )
     
-    val_dataset = RepresentationDataset(
+    val_dataset = ClassificationDataset(
         data_path=data_config['dataset_path'],
         split='val',
         vision_transform=val_vision_transforms,
         tactile_transform=val_tactile_transforms,
-        tactile_seq_len=config['model_params']['tactile_encoder']['seq_len'],
-        stereo_mode=True
+        tactile_seq_len=100,
+        stereo_mode=True,
+        num_classes=data_config['num_classes']
     )
     
     return train_dataset, val_dataset
@@ -123,35 +125,16 @@ def create_datasets(config: dict) -> tuple:
 def create_data_loaders(train_dataset, val_dataset, config: dict) -> tuple:
     """创建数据加载器"""
     data_config = config['data_params']
-    sampler_config = config.get('sampler_params', {})
     
-    # 训练集使用平衡采样器
-    if sampler_config.get('type') == 'balanced_batch':
-        train_sampler = BalancedBatchSampler(
-            dataset=train_dataset,
-            batch_size=data_config['batch_size'],
-            samples_per_class=sampler_config.get('samples_per_class', 8),
-            drop_last=True,
-            shuffle=True
-        )
-        
-        train_loader = DataLoader(
-            train_dataset,
-            batch_sampler=train_sampler,
-            num_workers=data_config['num_workers'],
-            pin_memory=data_config.get('pin_memory', True)
-        )
-    else:
-        train_loader = DataLoader(
-            train_dataset,
-            batch_size=data_config['batch_size'],
-            shuffle=True,
-            num_workers=data_config['num_workers'],
-            pin_memory=data_config.get('pin_memory', True),
-            drop_last=True
-        )
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=data_config['batch_size'],
+        shuffle=True,
+        num_workers=data_config['num_workers'],
+        pin_memory=data_config.get('pin_memory', True),
+        drop_last=True
+    )
     
-    # 验证集使用常规采样
     val_loader = DataLoader(
         val_dataset,
         batch_size=data_config['batch_size'],
@@ -164,61 +147,92 @@ def create_data_loaders(train_dataset, val_dataset, config: dict) -> tuple:
     return train_loader, val_loader
 
 
-def create_model(config: dict, device: torch.device) -> nn.Module:
-    """创建模型"""
+def create_models(config: dict, device: torch.device) -> tuple:
+    """创建表征模型和分类器"""
     model_config = config['model_params']
     
-    # 创建混合式表征模型
-    model = HybridRepresentationModel(
+    # 创建混合式表征模型（冻结）
+    representation_model = HybridRepresentationModel(
         # 视觉编码器参数
-        vision_encoder_weights_path=model_config['vision_encoder'].get('pretrained_weights_path'),
-        vision_model_name=model_config['vision_encoder']['model_name'],
-        freeze_vision_encoder=model_config['vision_encoder'].get('freeze_encoder', False),
+        vision_encoder_weights_path=model_config.get('representation_model_checkpoint'),
+        vision_model_name='vit_base_patch16_224',
+        freeze_vision_encoder=False,  # 这里不冻结，因为我们要加载预训练权重
         
         # 触觉编码器参数
-        tactile_feature_dim=model_config['tactile_encoder']['feature_dim'],
-        tactile_seq_len=model_config['tactile_encoder']['seq_len'],
-        tactile_d_model=model_config['tactile_encoder']['d_model'],
-        tactile_nhead=model_config['tactile_encoder']['nhead'],
-        tactile_num_layers=model_config['tactile_encoder']['num_layers'],
-        tactile_dim_feedforward=model_config['tactile_encoder']['dim_feedforward'],
-        tactile_dropout=model_config['tactile_encoder']['dropout'],
+        tactile_feature_dim=54,
+        tactile_seq_len=100,
+        tactile_d_model=768,
+        tactile_nhead=12,
+        tactile_num_layers=6,
+        tactile_dim_feedforward=3072,
+        tactile_dropout=0.1,
         
         # 投影头参数
-        embed_dim=model_config['projection']['embed_dim'],
-        projection_hidden_dim=model_config['projection']['projection_hidden_dim']
+        embed_dim=128,
+        projection_hidden_dim=768
     )
     
-    model = model.to(device)
+    # 加载预训练权重
+    checkpoint_path = model_config['representation_model_checkpoint']
+    if checkpoint_path and os.path.exists(checkpoint_path):
+        logger.info(f"Loading representation model from {checkpoint_path}")
+        checkpoint = torch.load(checkpoint_path, map_location='cpu')
+        if 'model_state_dict' in checkpoint:
+            representation_model.load_state_dict(checkpoint['model_state_dict'])
+        else:
+            representation_model.load_state_dict(checkpoint)
+        logger.info("Representation model loaded successfully")
+    else:
+        logger.warning(f"Representation model checkpoint not found at {checkpoint_path}")
+    
+    # 冻结表征模型
+    for param in representation_model.parameters():
+        param.requires_grad = False
+    representation_model.eval()
+    
+    # 创建分类器
+    classifier = ObjectClassifier(
+        feature_dim=model_config['feature_dim'],
+        hidden_dim=model_config['classifier_hidden_dim'],
+        num_classes=config['data_params']['num_classes'],
+        dropout=model_config.get('dropout', 0.2)
+    )
+    
+    # 移动到设备
+    representation_model = representation_model.to(device)
+    classifier = classifier.to(device)
     
     # 打印模型信息
-    model.print_model_info()
+    logger.info("Representation Model Info:")
+    representation_model.print_model_info()
+    logger.info("Classifier Model Info:")
+    classifier.print_model_info()
     
-    return model
+    return representation_model, classifier
 
 
-def create_optimizer_and_scheduler(model: nn.Module, config: dict) -> tuple:
+def create_optimizer_and_scheduler(classifier: nn.Module, config: dict) -> tuple:
     """创建优化器和学习率调度器"""
     train_config = config['training_params']
     scheduler_config = config.get('scheduler_params', {})
     
-    # 创建优化器
+    # 创建优化器（只优化分类器参数）
     if train_config['optimizer'].lower() == 'adamw':
         optimizer = optim.AdamW(
-            model.parameters(),
+            classifier.parameters(),
             lr=train_config['learning_rate'],
             weight_decay=train_config['weight_decay']
         )
     elif train_config['optimizer'].lower() == 'sgd':
         optimizer = optim.SGD(
-            model.parameters(),
+            classifier.parameters(),
             lr=train_config['learning_rate'],
             weight_decay=train_config['weight_decay'],
             momentum=0.9
         )
     else:
         optimizer = optim.Adam(
-            model.parameters(),
+            classifier.parameters(),
             lr=train_config['learning_rate'],
             weight_decay=train_config['weight_decay']
         )
@@ -228,19 +242,13 @@ def create_optimizer_and_scheduler(model: nn.Module, config: dict) -> tuple:
     if scheduler_config.get('type') == 'cosine':
         scheduler = optim.lr_scheduler.CosineAnnealingLR(
             optimizer,
-            T_max=scheduler_config.get('T_max', 100),
+            T_max=scheduler_config.get('T_max', 30),
             eta_min=scheduler_config.get('eta_min', 1e-6)
         )
     elif scheduler_config.get('type') == 'step':
         scheduler = optim.lr_scheduler.StepLR(
             optimizer,
-            step_size=scheduler_config.get('step_size', 30),
-            gamma=scheduler_config.get('gamma', 0.1)
-        )
-    elif scheduler_config.get('type') == 'multistep':
-        scheduler = optim.lr_scheduler.MultiStepLR(
-            optimizer,
-            milestones=scheduler_config.get('milestones', [60, 80]),
+            step_size=scheduler_config.get('step_size', 10),
             gamma=scheduler_config.get('gamma', 0.1)
         )
     
@@ -248,29 +256,33 @@ def create_optimizer_and_scheduler(model: nn.Module, config: dict) -> tuple:
 
 
 def create_loss_function(config: dict, device: torch.device) -> nn.Module:
-    """创建损失函数（支持HybridLoss）"""
-    loss_config = config['loss_params']
-    multi_task_cfg = config.get('multi_task_params', None)
+    """创建损失函数"""
+    return nn.CrossEntropyLoss().to(device)
 
-    if multi_task_cfg is not None:
-        alpha = float(multi_task_cfg.get('alpha', 0.5))
-        temperature = float(loss_config.get('temperature', 0.07))
-        loss_fn = HybridLoss(alpha=alpha, temperature=temperature)
-    else:
-        loss_fn = InfoNCELoss(
-            temperature=loss_config.get('temperature', 0.07),
-            reduction='mean'
-        )
+
+def custom_forward_fn(representation_model, classifier, batch_data):
+    """自定义前向传播函数"""
+    vision_data, tactile_data, labels = batch_data
     
-    return loss_fn.to(device)
+    # 使用表征模型提取特征（不计算梯度）
+    with torch.no_grad():
+        vision_emb, tactile_emb, _ = representation_model(vision_data, tactile_data)
+    
+    # 拼接特征
+    features = torch.cat([vision_emb, tactile_emb], dim=1)
+    
+    # 分类
+    logits = classifier(features)
+    
+    return logits, labels
 
 
 def save_checkpoint(
-    model: nn.Module,
+    classifier: nn.Module,
     optimizer: optim.Optimizer,
     scheduler,
     epoch: int,
-    best_recall: float,
+    best_accuracy: float,
     checkpoint_dir: str,
     is_best: bool = False
 ) -> None:
@@ -279,9 +291,9 @@ def save_checkpoint(
     
     checkpoint = {
         'epoch': epoch,
-        'model_state_dict': model.state_dict(),
+        'classifier_state_dict': classifier.state_dict(),
         'optimizer_state_dict': optimizer.state_dict(),
-        'best_recall': best_recall,
+        'best_accuracy': best_accuracy,
     }
     
     if scheduler:
@@ -293,18 +305,14 @@ def save_checkpoint(
     
     # 保存最佳模型
     if is_best:
-        best_path = os.path.join(checkpoint_dir, 'best_model.pth')
+        best_path = os.path.join(checkpoint_dir, 'best_classifier.pth')
         torch.save(checkpoint, best_path)
-        print(f"Best model saved with recall@1: {best_recall:.4f}")
-    
-    # 分别保存编码器（用于后续阶段）
-    if is_best:
-        model.save_encoders_separately(checkpoint_dir)
+        print(f"Best classifier saved with accuracy: {best_accuracy:.4f}")
 
 
 def main():
     # 解析命令行参数
-    parser = argparse.ArgumentParser(description='Stage 1: Multimodal Representation Learning')
+    parser = argparse.ArgumentParser(description='Stage 1.5: Multimodal Object Classification')
     parser.add_argument('--config', type=str, required=True,
                        help='Path to configuration file')
     parser.add_argument('--resume', type=str, default=None,
@@ -331,8 +339,9 @@ def main():
     os.makedirs(log_dir, exist_ok=True)
     
     # 设置日志
+    global logger
     logger = setup_logging(log_dir)
-    logger.info(f"Starting Stage 1 training with config: {args.config}")
+    logger.info(f"Starting Stage 1.5 training with config: {args.config}")
     
     # 创建数据集和数据加载器
     logger.info("Creating datasets...")
@@ -342,12 +351,16 @@ def main():
     logger.info(f"Train dataset size: {len(train_dataset)}")
     logger.info(f"Validation dataset size: {len(val_dataset)}")
     
+    # 打印类别分布
+    train_dataset.print_class_distribution()
+    val_dataset.print_class_distribution()
+    
     # 创建模型
-    logger.info("Creating model...")
-    model = create_model(config, device)
+    logger.info("Creating models...")
+    representation_model, classifier = create_models(config, device)
     
     # 创建优化器和调度器
-    optimizer, scheduler = create_optimizer_and_scheduler(model, config)
+    optimizer, scheduler = create_optimizer_and_scheduler(classifier, config)
     
     # 创建损失函数
     loss_fn = create_loss_function(config, device)
@@ -362,17 +375,17 @@ def main():
     
     # 恢复训练（如果指定）
     start_epoch = 1
-    best_recall = 0.0
+    best_accuracy = 0.0
     
     if args.resume:
         logger.info(f"Resuming from checkpoint: {args.resume}")
         checkpoint = torch.load(args.resume, map_location=device)
-        model.load_state_dict(checkpoint['model_state_dict'])
+        classifier.load_state_dict(checkpoint['classifier_state_dict'])
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         if scheduler and 'scheduler_state_dict' in checkpoint:
             scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
         start_epoch = checkpoint['epoch'] + 1
-        best_recall = checkpoint.get('best_recall', 0.0)
+        best_accuracy = checkpoint.get('best_accuracy', 0.0)
     
     # 训练循环
     train_config = config['training_params']
@@ -387,8 +400,9 @@ def main():
         logger.info(f"\nEpoch {epoch}/{epochs}")
         
         # 训练阶段
-        train_results = train_representation_epoch(
-            model=model,
+        train_results = train_classification_epoch(
+            representation_model=representation_model,
+            classifier=classifier,
             data_loader=train_loader,
             optimizer=optimizer,
             loss_fn=loss_fn,
@@ -402,50 +416,41 @@ def main():
         
         # 验证阶段（每eval_freq个epoch进行一次）
         if epoch % eval_freq == 0:
-            val_results = evaluate_representation_epoch(
-                model=model,
+            val_results = evaluate_classification_epoch(
+                representation_model=representation_model,
+                classifier=classifier,
                 data_loader=val_loader,
                 loss_fn=loss_fn,
                 device=device,
                 epoch=epoch,
-                metrics=['loss', 'retrieval_recall@1', 'retrieval_recall@5', 'accuracy'],
                 logger=logger
             )
             
             # 记录到TensorBoard
             writer.add_scalar('Val/Loss', val_results['average_loss'], epoch)
+            writer.add_scalar('Val/Accuracy', val_results['accuracy'], epoch)
             
-            if 'retrieval_recall@1' in val_results:
-                writer.add_scalar('Val/Recall@1', val_results['retrieval_recall@1'], epoch)
-                current_recall = val_results['retrieval_recall@1']
-            else:
-                current_recall = 0.0
-            
-            if 'retrieval_recall@5' in val_results:
-                writer.add_scalar('Val/Recall@5', val_results['retrieval_recall@5'], epoch)
-            
-            if 'accuracy' in val_results:
-                writer.add_scalar('Val/Accuracy', val_results['accuracy'], epoch)
+            current_accuracy = val_results['accuracy']
         else:
-            val_results = {'average_loss': 0.0}
-            current_recall = 0.0
+            val_results = {'average_loss': 0.0, 'accuracy': 0.0}
+            current_accuracy = 0.0
         
         # 记录训练指标到TensorBoard
         writer.add_scalar('Train/Loss', train_results['average_loss'], epoch)
         writer.add_scalar('Train/LearningRate', train_results['learning_rate'], epoch)
         
         # 保存检查点
-        is_best = current_recall > best_recall
+        is_best = current_accuracy > best_accuracy
         if is_best:
-            best_recall = current_recall
+            best_accuracy = current_accuracy
         
         if epoch % save_freq == 0 or is_best:
             save_checkpoint(
-                model=model,
+                classifier=classifier,
                 optimizer=optimizer,
                 scheduler=scheduler,
                 epoch=epoch,
-                best_recall=best_recall,
+                best_accuracy=best_accuracy,
                 checkpoint_dir=checkpoint_dir,
                 is_best=is_best
             )
@@ -454,29 +459,107 @@ def main():
         if epoch % eval_freq == 0:
             logger.info(f"Epoch {epoch} - Train Loss: {train_results['average_loss']:.4f}, "
                        f"Val Loss: {val_results['average_loss']:.4f}, "
-                       f"Val Recall@1: {current_recall:.4f}, Best Recall@1: {best_recall:.4f}")
+                       f"Val Accuracy: {current_accuracy:.4f}, Best Accuracy: {best_accuracy:.4f}")
         else:
             logger.info(f"Epoch {epoch} - Train Loss: {train_results['average_loss']:.4f}")
     
     # 训练完成
-    logger.info(f"Training completed! Best Recall@1: {best_recall:.4f}")
+    logger.info(f"Training completed! Best Accuracy: {best_accuracy:.4f}")
     
     # 保存最终模型
-    final_checkpoint_path = os.path.join(checkpoint_dir, 'final_model.pth')
+    final_checkpoint_path = os.path.join(checkpoint_dir, 'final_classifier.pth')
     torch.save({
         'epoch': epochs,
-        'model_state_dict': model.state_dict(),
-        'best_recall': best_recall,
+        'classifier_state_dict': classifier.state_dict(),
+        'best_accuracy': best_accuracy,
         'config': config
     }, final_checkpoint_path)
     
-    logger.info(f"Final model saved to: {final_checkpoint_path}")
-    
-    # 分别保存编码器
-    model.save_encoders_separately(checkpoint_dir)
+    logger.info(f"Final classifier saved to: {final_checkpoint_path}")
     
     # 关闭TensorBoard写入器
     writer.close()
+
+
+def train_classification_epoch(
+    representation_model: nn.Module,
+    classifier: nn.Module,
+    data_loader: DataLoader,
+    optimizer: optim.Optimizer,
+    loss_fn: nn.Module,
+    device: torch.device,
+    epoch: int,
+    lr_scheduler=None,
+    scaler=None,
+    log_freq: int = 10,
+    logger=None
+) -> dict:
+    """训练一个epoch的分类器"""
+    classifier.train()
+    representation_model.eval()  # 确保表征模型处于评估模式
+    
+    total_loss = 0.0
+    total_samples = 0
+    all_predictions = []
+    all_labels = []
+    
+    for batch_idx, batch_data in enumerate(data_loader):
+        # 数据移动到设备
+        vision_data, tactile_data, labels = batch_data
+        vision_data = vision_data.to(device)
+        tactile_data = tactile_data.to(device)
+        labels = labels.to(device)
+        
+        batch_size = vision_data.shape[0]
+        
+        # 清空梯度
+        optimizer.zero_grad()
+        
+        # 前向传播
+        with torch.cuda.amp.autocast(enabled=scaler is not None):
+            logits, _ = custom_forward_fn(representation_model, classifier, (vision_data, tactile_data, labels))
+            loss = loss_fn(logits, labels)
+        
+        # 反向传播
+        if scaler is not None:
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
+        else:
+            loss.backward()
+            optimizer.step()
+        
+        # 更新统计信息
+        total_loss += loss.item() * batch_size
+        total_samples += batch_size
+        
+        # 收集预测结果
+        predictions = torch.argmax(logits, dim=1)
+        all_predictions.extend(predictions.cpu().numpy())
+        all_labels.extend(labels.cpu().numpy())
+        
+        # 定期打印日志
+        if (batch_idx + 1) % log_freq == 0:
+            current_lr = optimizer.param_groups[0]['lr']
+            avg_loss = total_loss / total_samples
+            logger.info(f'Epoch {epoch} | Batch {batch_idx + 1}/{len(data_loader)} | '
+                       f'Loss: {loss.item():.4f} | Avg Loss: {avg_loss:.4f} | LR: {current_lr:.2e}')
+    
+    # 更新学习率调度器
+    if lr_scheduler is not None:
+        lr_scheduler.step()
+    
+    # 计算准确率
+    accuracy = accuracy_score(all_labels, all_predictions)
+    avg_loss = total_loss / total_samples
+    
+    return {
+        'epoch': epoch,
+        'average_loss': avg_loss,
+        'accuracy': accuracy,
+        'total_samples': total_samples,
+        'learning_rate': optimizer.param_groups[0]['lr']
+    }
 
 
 if __name__ == '__main__':

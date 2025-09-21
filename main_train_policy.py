@@ -24,7 +24,8 @@ from typing import Dict, List, Any
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from models.policy_model import PolicyModel, DAggerTrainer
-from models.representation_model import RepresentationModel
+from models.representation_model import HybridRepresentationModel
+from models.classifier import ObjectClassifier
 from data_loader.dataset import PolicyDataset
 from data_loader.samplers import DAggerSampler
 from engine.trainer import train_policy_epoch
@@ -72,13 +73,13 @@ def load_config(config_path: str) -> dict:
     return config
 
 
-def create_representation_model(config: dict, device: torch.device) -> RepresentationModel:
+def create_representation_model(config: dict, device: torch.device) -> HybridRepresentationModel:
     """创建并加载表征模型"""
     model_config = config['model_params']
     rep_config = model_config['representation_model']
     
-    # 创建表征模型
-    rep_model = RepresentationModel(
+    # 创建混合式表征模型
+    rep_model = HybridRepresentationModel(
         vision_encoder_weights_path=None,  # 稍后从检查点加载
         embed_dim=128  # 使用默认值，稍后从检查点加载
     )
@@ -102,14 +103,49 @@ def create_representation_model(config: dict, device: torch.device) -> Represent
     return rep_model.to(device)
 
 
+def create_classifier_model(config: dict, device: torch.device) -> ObjectClassifier:
+    """创建并加载分类器模型"""
+    model_config = config['model_params']
+    classifier_config = model_config.get('classifier_model', {})
+    
+    # 创建分类器
+    classifier = ObjectClassifier(
+        feature_dim=classifier_config.get('feature_dim', 1536),  # 768 + 768
+        hidden_dim=classifier_config.get('hidden_dim', 512),
+        num_classes=classifier_config.get('num_classes', 15),
+        dropout=classifier_config.get('dropout', 0.2)
+    )
+    
+    # 加载预训练权重
+    weights_path = classifier_config.get('weights_path')
+    if weights_path and os.path.exists(weights_path):
+        checkpoint = torch.load(weights_path, map_location=device)
+        if 'classifier_state_dict' in checkpoint:
+            classifier.load_state_dict(checkpoint['classifier_state_dict'])
+        else:
+            classifier.load_state_dict(checkpoint)
+        print(f"Loaded classifier from: {weights_path}")
+    else:
+        print(f"Warning: Classifier weights not found at {weights_path}")
+    
+    # 冻结分类器
+    classifier.eval()
+    for param in classifier.parameters():
+        param.requires_grad = False
+    
+    return classifier.to(device)
+
+
 def create_policy_model(config: dict, device: torch.device) -> PolicyModel:
     """创建策略模型"""
     model_config = config['model_params']['policy_model']
+    classifier_config = config['model_params'].get('classifier_model', {})
     
     policy_model = PolicyModel(
         vision_feature_dim=model_config.get('vision_feature_dim', 768),
         tactile_feature_dim=model_config.get('tactile_feature_dim', 768),
         geometry_feature_dim=model_config.get('geometry_feature_dim', 3),
+        classification_feature_dim=classifier_config.get('num_classes', 15),  # 新增分类特征维度
         lstm_hidden_dim=model_config['lstm_hidden_dim'],
         lstm_num_layers=model_config['lstm_num_layers'],
         lstm_dropout=model_config['lstm_dropout'],
@@ -279,6 +315,7 @@ def collect_policy_rollouts(
     policy_model: PolicyModel,
     robot_interface: RobotInterface,
     representation_model: RepresentationModel,
+    classifier: ObjectClassifier,
     config: dict,
     num_episodes: int = 10
 ) -> List[Dict[str, Any]]:
@@ -289,6 +326,7 @@ def collect_policy_rollouts(
         policy_model: 策略模型
         robot_interface: 机器人接口
         representation_model: 表征模型
+        classifier: 分类器模型
         config: 配置
         num_episodes: episode数量
     
@@ -337,15 +375,21 @@ def collect_policy_rollouts(
                 vision_features, _ = representation_model.encode_vision(vision_tensor)
                 tactile_features, _ = representation_model.encode_tactile(tactile_tensor)
                 
+                # 通过分类器获取分类特征
+                with torch.no_grad():
+                    combined_features = torch.cat([vision_features, tactile_features], dim=1)
+                    classification_logits = classifier(combined_features)
+                
                 # 计算几何特征（3D坐标）
                 # 这里需要实现具体的几何计算逻辑
                 geometry_features = torch.zeros(1, 3).to(device)  # 占位符
                 
-                # 构建状态向量
+                # 构建状态向量（包含分类特征）
                 state_vector = torch.cat([
                     vision_features,
                     tactile_features,
-                    geometry_features
+                    geometry_features,
+                    classification_logits
                 ], dim=1)
                 
                 states.append(state_vector.cpu().numpy())
@@ -384,6 +428,7 @@ def collect_policy_rollouts(
 def run_dagger_iteration(
     policy_model: PolicyModel,
     representation_model: RepresentationModel,
+    classifier: ObjectClassifier,
     robot_interface: RobotInterface,
     config: dict,
     iteration: int,
@@ -395,6 +440,7 @@ def run_dagger_iteration(
     Args:
         policy_model: 策略模型
         representation_model: 表征模型
+        classifier: 分类器模型
         robot_interface: 机器人接口
         config: 配置
         iteration: 迭代次数
@@ -411,7 +457,7 @@ def run_dagger_iteration(
     # 1. 使用当前策略收集轨迹
     logger.info("Collecting policy rollouts...")
     rollouts = collect_policy_rollouts(
-        policy_model, robot_interface, representation_model, 
+        policy_model, robot_interface, representation_model, classifier,
         config, episodes_per_iteration
     )
     
@@ -515,6 +561,10 @@ def main():
     representation_model = create_representation_model(config, device)
     representation_model.eval()
     
+    # 创建分类器模型（冻结）
+    logger.info("Loading classifier model...")
+    classifier = create_classifier_model(config, device)
+    
     # 创建策略模型
     logger.info("Creating policy model...")
     policy_model = create_policy_model(config, device)
@@ -575,7 +625,7 @@ def main():
         # 如果不是第一次迭代且有机器人接口，收集新数据
         if iteration > 0 and robot_interface is not None:
             new_data = run_dagger_iteration(
-                policy_model, representation_model, robot_interface,
+                policy_model, representation_model, classifier, robot_interface,
                 config, iteration, logger
             )
             aggregated_data.extend(new_data)

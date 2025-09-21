@@ -12,10 +12,10 @@ from .vision_encoder import ViTEncoder
 from .tactile_encoder import TransformerTactileEncoder
 
 
-class RepresentationModel(nn.Module):
+class HybridRepresentationModel(nn.Module):
     """
-    多模态表征学习模型
-    集成视觉编码器和触觉编码器，通过对比学习训练统一的多模态表征
+    混合式多模态表征学习模型
+    集成视觉编码器和触觉编码器，通过混合式自监督学习（对比学习+跨模态预测）训练统一的多模态表征
     """
     
     def __init__(
@@ -55,7 +55,7 @@ class RepresentationModel(nn.Module):
             projection_hidden_dim: 投影头隐藏层维度
             projection_dropout: 投影头dropout
         """
-        super(RepresentationModel, self).__init__()
+        super(HybridRepresentationModel, self).__init__()
         
         # 保存配置
         self.embed_dim = embed_dim

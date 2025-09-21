@@ -21,6 +21,7 @@ class PolicyModel(nn.Module):
         vision_feature_dim: int = 768,
         tactile_feature_dim: int = 768,
         geometry_feature_dim: int = 3,  # 3D坐标 (X, Y, Z)
+        classification_feature_dim: int = 15,  # 分类器输出维度（类别数量）
         
         # LSTM参数
         lstm_hidden_dim: int = 512,
@@ -43,6 +44,7 @@ class PolicyModel(nn.Module):
             vision_feature_dim: 视觉特征维度
             tactile_feature_dim: 触觉特征维度
             geometry_feature_dim: 几何特征维度
+            classification_feature_dim: 分类特征维度（类别数量）
             lstm_hidden_dim: LSTM隐藏层维度
             lstm_num_layers: LSTM层数
             lstm_dropout: LSTM dropout
@@ -58,13 +60,14 @@ class PolicyModel(nn.Module):
         self.vision_feature_dim = vision_feature_dim
         self.tactile_feature_dim = tactile_feature_dim
         self.geometry_feature_dim = geometry_feature_dim
+        self.classification_feature_dim = classification_feature_dim
         self.lstm_hidden_dim = lstm_hidden_dim
         self.lstm_num_layers = lstm_num_layers
         self.action_dim = action_dim
         self.use_layer_norm = use_layer_norm
         
-        # 计算状态向量总维度
-        self.state_dim = vision_feature_dim + tactile_feature_dim + geometry_feature_dim
+        # 计算状态向量总维度（包含分类特征）
+        self.state_dim = vision_feature_dim + tactile_feature_dim + geometry_feature_dim + classification_feature_dim
         
         # 状态预处理层
         self.state_preprocessor = nn.Sequential(
@@ -317,6 +320,12 @@ class PolicyModel(nn.Module):
             'action_dim': self.action_dim,
             'lstm_hidden_dim': self.lstm_hidden_dim,
             'lstm_num_layers': self.lstm_num_layers,
+            'feature_dimensions': {
+                'vision': self.vision_feature_dim,
+                'tactile': self.tactile_feature_dim,
+                'geometry': self.geometry_feature_dim,
+                'classification': self.classification_feature_dim
+            },
             'component_parameters': {
                 'lstm': lstm_params,
                 'mlp_head': mlp_params,
@@ -335,6 +344,12 @@ class PolicyModel(nn.Module):
         print(f"  Action Dimension: {info['action_dim']}")
         print(f"  LSTM Hidden Dimension: {info['lstm_hidden_dim']}")
         print(f"  LSTM Layers: {info['lstm_num_layers']}")
+        print()
+        print("  Feature Dimensions:")
+        print(f"    Vision: {info['feature_dimensions']['vision']}")
+        print(f"    Tactile: {info['feature_dimensions']['tactile']}")
+        print(f"    Geometry: {info['feature_dimensions']['geometry']}")
+        print(f"    Classification: {info['feature_dimensions']['classification']}")
         print()
         print("  Component Parameters:")
         print(f"    State Preprocessor: {info['component_parameters']['preprocessor']:,}")

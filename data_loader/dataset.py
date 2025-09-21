@@ -329,3 +329,147 @@ class PolicyDataset(Dataset):
                 return [dummy_element.copy() for _ in range(target_length)]
         else:
             return sequence
+
+
+class ClassificationDataset(Dataset):
+    """
+    分类数据集，用于阶段1.5的多模态对象分类
+    基于RepresentationDataset，但增加了类别标签
+    """
+    
+    def __init__(
+        self,
+        data_path: str,
+        split: str = 'train',
+        vision_transform: Optional[Any] = None,
+        tactile_transform: Optional[Any] = None,
+        tactile_seq_len: int = 100,
+        stereo_mode: bool = True,
+        num_classes: int = 15
+    ):
+        """
+        Args:
+            data_path: 数据集路径
+            split: 数据集划分
+            vision_transform: 视觉数据变换
+            tactile_transform: 触觉数据变换
+            tactile_seq_len: 触觉序列长度
+            stereo_mode: 是否使用双目视觉
+            num_classes: 物体类别数量
+        """
+        self.data_path = data_path
+        self.split = split
+        self.vision_transform = vision_transform
+        self.tactile_transform = tactile_transform
+        self.tactile_seq_len = tactile_seq_len
+        self.stereo_mode = stereo_mode
+        self.num_classes = num_classes
+        
+        # 加载数据索引（包含类别标签）
+        self.samples = self._load_samples()
+        
+    def _load_samples(self) -> List[Dict[str, Any]]:
+        """加载样本索引（包含类别标签）"""
+        samples = []
+        split_file = os.path.join(self.data_path, f'{self.split}_classification_index.json')
+        
+        if os.path.exists(split_file):
+            # 如果存在分类索引文件，直接加载
+            with open(split_file, 'r') as f:
+                data_index = json.load(f)
+        else:
+            # 否则从表征学习索引文件加载，并添加默认标签
+            # 这里假设object_id可以作为类别标签，实际使用时需要根据具体情况调整
+            repr_split_file = os.path.join(self.data_path, f'{self.split}_index.json')
+            with open(repr_split_file, 'r') as f:
+                data_index = json.load(f)
+            
+            # 为每个样本添加类别标签（这里使用object_id的哈希值作为类别）
+            for item in data_index:
+                # 使用object_id的哈希值来确定类别，确保一致性
+                class_id = hash(item['object_id']) % self.num_classes
+                item['class_id'] = class_id
+                
+        for item in data_index:
+            samples.append({
+                'object_id': item['object_id'],
+                'timestamp': item['timestamp'],
+                'class_id': item.get('class_id', 0),  # 默认类别为0
+                'vision_path': os.path.join(self.data_path, item['vision_path']),
+                'tactile_path': os.path.join(self.data_path, item['tactile_path']),
+                'stereo_left_path': os.path.join(self.data_path, item.get('stereo_left_path', '')),
+                'stereo_right_path': os.path.join(self.data_path, item.get('stereo_right_path', '')),
+                'metadata': item.get('metadata', {})
+            })
+            
+        return samples
+    
+    def __len__(self) -> int:
+        return len(self.samples)
+    
+    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor, int]:
+        """
+        返回视觉数据、触觉数据和类别标签
+        
+        Returns:
+            (vision_data, tactile_data, class_label)
+        """
+        sample = self.samples[idx]
+        
+        # 加载视觉数据（与RepresentationDataset相同的逻辑）
+        if self.stereo_mode and os.path.exists(sample['stereo_left_path']) and os.path.exists(sample['stereo_right_path']):
+            # 双目视觉模式
+            left_img = Image.open(sample['stereo_left_path']).convert('RGB')
+            right_img = Image.open(sample['stereo_right_path']).convert('RGB')
+            
+            # 水平拼接双目图像
+            left_array = np.array(left_img)
+            right_array = np.array(right_img)
+            stereo_image = np.concatenate([left_array, right_array], axis=1)
+            vision_data = Image.fromarray(stereo_image)
+        else:
+            # 单目视觉模式
+            vision_data = Image.open(sample['vision_path']).convert('RGB')
+        
+        # 加载触觉数据
+        tactile_data = load_tactile_sequence(
+            sample['tactile_path'], 
+            seq_len=self.tactile_seq_len
+        )
+        
+        # 应用变换
+        if self.vision_transform:
+            vision_data = self.vision_transform(vision_data)
+            
+        if self.tactile_transform:
+            tactile_data = self.tactile_transform(tactile_data)
+        
+        # 转换为tensor
+        if not isinstance(vision_data, torch.Tensor):
+            vision_data = torch.from_numpy(np.array(vision_data)).float()
+            
+        if not isinstance(tactile_data, torch.Tensor):
+            tactile_data = torch.from_numpy(tactile_data).float()
+        
+        # 获取类别标签
+        class_label = sample['class_id']
+        
+        return vision_data, tactile_data, class_label
+    
+    def get_class_distribution(self) -> Dict[int, int]:
+        """获取类别分布统计"""
+        class_counts = {}
+        for sample in self.samples:
+            class_id = sample['class_id']
+            class_counts[class_id] = class_counts.get(class_id, 0) + 1
+        return class_counts
+    
+    def print_class_distribution(self) -> None:
+        """打印类别分布"""
+        class_counts = self.get_class_distribution()
+        print(f"Class distribution for {self.split} split:")
+        for class_id in sorted(class_counts.keys()):
+            count = class_counts[class_id]
+            percentage = count / len(self.samples) * 100
+            print(f"  Class {class_id}: {count} samples ({percentage:.1f}%)")
+        print(f"Total samples: {len(self.samples)}")
