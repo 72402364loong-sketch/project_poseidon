@@ -232,6 +232,85 @@ def evaluate_one_epoch(
     return results
 
 
+# --- 新增 Start ---
+def get_action_with_uncertainty(
+    policy_model: nn.Module,
+    state: torch.Tensor,
+    hidden_state: Optional[tuple] = None,
+    mc_samples: int = 25
+) -> tuple:
+    """
+    通过MC Dropout执行多次前向传播，计算动作的均值和不确定性。
+    
+    Args:
+        policy_model: 策略模型
+        state: 当前状态，形状为 (batch_size, state_dim) 或 (state_dim,)
+        hidden_state: LSTM隐藏状态
+        mc_samples: MC Dropout采样次数
+        
+    Returns:
+        (mean_action, arm_uncertainty, gripper_uncertainty)
+        - mean_action: 平均动作，形状为 (batch_size, 7) 或 (7,)
+        - arm_uncertainty: 机械臂动作的不确定性（6维方差和）
+        - gripper_uncertainty: 夹爪动作的不确定性（1维方差）
+    """
+    policy_model.eval()      # 切换到评估模式
+    policy_model.enable_dropout() # 但强制激活Dropout
+
+    actions = []
+    with torch.no_grad():
+        for _ in range(mc_samples):
+            action, _ = policy_model.predict_step(state, hidden_state)
+            actions.append(action)
+    
+    # 将多次采样的动作堆叠起来
+    actions_tensor = torch.stack(actions) # Shape: (mc_samples, batch, action_dim)
+    
+    # 计算均值作为最终执行的动作
+    mean_action = actions_tensor.mean(dim=0)
+    
+    # 计算方差作为不确定性得分
+    variances = actions_tensor.var(dim=0)  # Shape: (batch, action_dim)
+    
+    # 解耦的不确定性计算
+    # 前6维：机械臂动作 [dx, dy, dz, d_roll, d_pitch, d_yaw]
+    arm_variances = variances[..., :6]  # Shape: (batch, 6)
+    arm_uncertainty = arm_variances.sum(dim=-1)  # Shape: (batch,)
+    
+    # 第7维：夹爪动作 [gripper_angle]
+    gripper_uncertainty = variances[..., 6]  # Shape: (batch,)
+    
+    # 如果是单样本，返回标量
+    if mean_action.dim() == 1:
+        arm_uncertainty = arm_uncertainty.item()
+        gripper_uncertainty = gripper_uncertainty.item()
+    
+    return mean_action, arm_uncertainty, gripper_uncertainty
+
+
+def should_request_expert_annotation(
+    arm_uncertainty: float,
+    gripper_uncertainty: float,
+    arm_threshold: float,
+    gripper_threshold: float
+) -> bool:
+    """
+    判断是否应该请求专家标注
+    
+    Args:
+        arm_uncertainty: 机械臂动作的不确定性
+        gripper_uncertainty: 夹爪动作的不确定性
+        arm_threshold: 机械臂不确定性阈值
+        gripper_threshold: 夹爪不确定性阈值
+        
+    Returns:
+        是否应该请求专家标注
+    """
+    return (arm_uncertainty > arm_threshold or 
+            gripper_uncertainty > gripper_threshold)
+# --- 新增 End ---
+
+
 def _get_batch_size(batch_data) -> int:
     """获取批次大小"""
     if isinstance(batch_data, torch.Tensor):
@@ -590,3 +669,82 @@ def evaluate_classification_epoch(
         print(summary_msg)
     
     return results
+
+
+# --- 新增 Start ---
+def get_action_with_uncertainty(
+    policy_model: nn.Module,
+    state: torch.Tensor,
+    hidden_state: Optional[tuple] = None,
+    mc_samples: int = 25
+) -> tuple:
+    """
+    通过MC Dropout执行多次前向传播，计算动作的均值和不确定性。
+    
+    Args:
+        policy_model: 策略模型
+        state: 当前状态，形状为 (batch_size, state_dim) 或 (state_dim,)
+        hidden_state: LSTM隐藏状态
+        mc_samples: MC Dropout采样次数
+        
+    Returns:
+        (mean_action, arm_uncertainty, gripper_uncertainty)
+        - mean_action: 平均动作，形状为 (batch_size, 7) 或 (7,)
+        - arm_uncertainty: 机械臂动作的不确定性（6维方差和）
+        - gripper_uncertainty: 夹爪动作的不确定性（1维方差）
+    """
+    policy_model.eval()      # 切换到评估模式
+    policy_model.enable_dropout() # 但强制激活Dropout
+
+    actions = []
+    with torch.no_grad():
+        for _ in range(mc_samples):
+            action, _ = policy_model.predict_step(state, hidden_state)
+            actions.append(action)
+    
+    # 将多次采样的动作堆叠起来
+    actions_tensor = torch.stack(actions) # Shape: (mc_samples, batch, action_dim)
+    
+    # 计算均值作为最终执行的动作
+    mean_action = actions_tensor.mean(dim=0)
+    
+    # 计算方差作为不确定性得分
+    variances = actions_tensor.var(dim=0)  # Shape: (batch, action_dim)
+    
+    # 解耦的不确定性计算
+    # 前6维：机械臂动作 [dx, dy, dz, d_roll, d_pitch, d_yaw]
+    arm_variances = variances[..., :6]  # Shape: (batch, 6)
+    arm_uncertainty = arm_variances.sum(dim=-1)  # Shape: (batch,)
+    
+    # 第7维：夹爪动作 [gripper_angle]
+    gripper_uncertainty = variances[..., 6]  # Shape: (batch,)
+    
+    # 如果是单样本，返回标量
+    if mean_action.dim() == 1:
+        arm_uncertainty = arm_uncertainty.item()
+        gripper_uncertainty = gripper_uncertainty.item()
+    
+    return mean_action, arm_uncertainty, gripper_uncertainty
+
+
+def should_request_expert_annotation(
+    arm_uncertainty: float,
+    gripper_uncertainty: float,
+    arm_threshold: float,
+    gripper_threshold: float
+) -> bool:
+    """
+    判断是否应该请求专家标注
+    
+    Args:
+        arm_uncertainty: 机械臂动作的不确定性
+        gripper_uncertainty: 夹爪动作的不确定性
+        arm_threshold: 机械臂不确定性阈值
+        gripper_threshold: 夹爪不确定性阈值
+        
+    Returns:
+        是否应该请求专家标注
+    """
+    return (arm_uncertainty > arm_threshold or 
+            gripper_uncertainty > gripper_threshold)
+# --- 新增 End ---

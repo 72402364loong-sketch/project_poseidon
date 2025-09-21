@@ -25,7 +25,7 @@ model_params:
     lstm_num_layers: 2
     lstm_dropout: 0.1
     # 输出动作维度
-    action_dim: 6  # 机器人6DOF动作
+    action_dim: 7  # 7维动作：6DOF机械臂 + 1DOF夹爪
     # MLP参数
     mlp_hidden_dims: [256, 128]
     mlp_dropout: 0.1
@@ -127,3 +127,26 @@ evaluation_params:
 device_params:
   use_cuda: true
   mixed_precision: false  # 策略学习阶段不使用混合精度，保证数值稳定性
+
+# --- 新增 Start ---
+# 主动学习参数
+active_learning_params:
+  # 是否启用主动学习, true: 启用, false: 等同于原DAgger
+  enabled: true
+  
+  # 用于MC Dropout的前向传播采样次数 T
+  mc_dropout_samples: 25
+  
+  # 解耦的不确定性阈值
+  # 机械臂动作的不确定性阈值（6维：dx, dy, dz, d_roll, d_pitch, d_yaw）
+  arm_uncertainty_threshold: 0.1
+  # 夹爪动作的不确定性阈值（1维：gripper_angle）
+  gripper_uncertainty_threshold: 0.05
+  
+  # 专家接口配置
+  expert_interface:
+    # 是否使用模拟专家（用于开发和调试）
+    use_simulated_expert: true
+    # 模拟专家的目标位置（如果使用模拟专家）
+    simulated_goal_position: [0.0, 0.0, 0.3]
+# --- 新增 End ---

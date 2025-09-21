@@ -29,7 +29,7 @@ class PolicyModel(nn.Module):
         lstm_dropout: float = 0.1,
         
         # 输出参数
-        action_dim: int = 6,  # 6DOF机器人动作
+        action_dim: int = 7,  # 7维动作：6DOF机械臂 + 1DOF夹爪
         
         # MLP参数
         mlp_hidden_dims: List[int] = None,
@@ -108,6 +108,11 @@ class PolicyModel(nn.Module):
         
         self.mlp_head = nn.Sequential(*mlp_layers)
         
+        # --- 新增/修改 Start ---
+        # 为MC Dropout添加额外的dropout层
+        self.mc_dropout = nn.Dropout(p=mlp_dropout)
+        # --- 新增/修改 End ---
+        
         # 初始化权重
         self._init_weights()
     
@@ -176,7 +181,11 @@ class PolicyModel(nn.Module):
         # lstm_output: (batch, seq, lstm_hidden_dim)
         
         # 通过MLP输出头
-        actions = self.mlp_head(lstm_output)  # (batch, seq, action_dim)
+        # --- 新增/修改 Start ---
+        # 即使在eval模式下，dropout也可能被激活（通过enable_dropout()）
+        lstm_output_d = self.mc_dropout(lstm_output)
+        actions = self.mlp_head(lstm_output_d)  # (batch, seq, action_dim)
+        # --- 新增/修改 End ---
         
         if return_hidden:
             return actions, final_hidden
@@ -233,6 +242,14 @@ class PolicyModel(nn.Module):
         )
         
         return h_0, c_0
+    
+    # --- 新增 Start ---
+    def enable_dropout(self):
+        """在评估模式下，强制激活所有Dropout层"""
+        for m in self.modules():
+            if m.__class__.__name__.startswith('Dropout'):
+                m.train()
+    # --- 新增 End ---
     
     def reset_hidden_state(self, hidden_state: Tuple[torch.Tensor, torch.Tensor]) -> Tuple[torch.Tensor, torch.Tensor]:
         """

@@ -29,9 +29,10 @@ from models.classifier import ObjectClassifier
 from data_loader.dataset import PolicyDataset
 from data_loader.samplers import DAggerSampler
 from engine.trainer import train_policy_epoch
-from engine.evaluator import evaluate_policy_epoch
+from engine.evaluator import evaluate_policy_epoch, get_action_with_uncertainty, should_request_expert_annotation
 from engine.losses import PolicyLoss
 from robot.interface import RobotInterface, VisionSensor, TactileSensor
+from robot.expert import ExpertFactory
 
 
 def setup_logging(log_dir: str) -> logging.Logger:
@@ -314,19 +315,21 @@ def expert_policy_function(state: np.ndarray) -> np.ndarray:
 def collect_policy_rollouts(
     policy_model: PolicyModel,
     robot_interface: RobotInterface,
-    representation_model: RepresentationModel,
+    representation_model: HybridRepresentationModel,
     classifier: ObjectClassifier,
+    expert: Any,
     config: dict,
     num_episodes: int = 10
 ) -> List[Dict[str, Any]]:
     """
-    收集策略执行的轨迹数据
+    收集策略执行的轨迹数据（集成主动学习）
     
     Args:
         policy_model: 策略模型
         robot_interface: 机器人接口
         representation_model: 表征模型
         classifier: 分类器模型
+        expert: 专家接口
         config: 配置
         num_episodes: episode数量
     
@@ -342,6 +345,19 @@ def collect_policy_rollouts(
     dagger_config = config.get('dagger_params', {})
     max_episode_length = dagger_config.get('max_episode_length', 100)
     
+    # --- 新增/修改 Start ---
+    # 获取主动学习配置
+    active_learning_config = config.get('active_learning_params', {})
+    active_learning_enabled = active_learning_config.get('enabled', False)
+    mc_samples = active_learning_config.get('mc_dropout_samples', 25)
+    arm_threshold = active_learning_config.get('arm_uncertainty_threshold', 0.1)
+    gripper_threshold = active_learning_config.get('gripper_uncertainty_threshold', 0.05)
+    
+    # 统计信息
+    total_steps = 0
+    expert_requests = 0
+    # --- 新增/修改 End ---
+    
     with torch.no_grad():
         for episode in range(num_episodes):
             print(f"Collecting episode {episode + 1}/{num_episodes}")
@@ -349,6 +365,8 @@ def collect_policy_rollouts(
             # 初始化episode
             states = []
             actions = []
+            expert_actions = []  # 存储专家动作
+            uncertainty_scores = []  # 存储不确定性分数
             
             # 初始化LSTM隐藏状态
             hidden_state = policy_model.init_hidden_state(1, device)
@@ -372,8 +390,7 @@ def collect_policy_rollouts(
                 tactile_tensor = torch.from_numpy(tactile_data.data).float().unsqueeze(0).unsqueeze(0).to(device)
                 
                 # 通过表征模型提取特征
-                vision_features, _ = representation_model.encode_vision(vision_tensor)
-                tactile_features, _ = representation_model.encode_tactile(tactile_tensor)
+                vision_features, tactile_features, _ = representation_model(vision_tensor, tactile_tensor)
                 
                 # 通过分类器获取分类特征
                 with torch.no_grad():
@@ -394,20 +411,87 @@ def collect_policy_rollouts(
                 
                 states.append(state_vector.cpu().numpy())
                 
-                # 策略预测
-                predicted_action, hidden_state = policy_model.predict_step(
-                    state_vector, hidden_state
-                )
+                # --- 新增/修改 Start ---
+                # 主动学习：使用MC Dropout计算不确定性和动作
+                if active_learning_enabled:
+                    # 使用MC Dropout获取动作和不确定性
+                    robot_action, arm_uncertainty, gripper_uncertainty = get_action_with_uncertainty(
+                        policy_model,
+                        state_vector,
+                        hidden_state,
+                        mc_samples
+                    )
+                    
+                    # 判断是否需要专家标注
+                    need_expert = should_request_expert_annotation(
+                        arm_uncertainty, gripper_uncertainty, arm_threshold, gripper_threshold
+                    )
+                    
+                    if need_expert:
+                        # 请求专家标注
+                        print(f"🤖 高不确定性! Arm: {arm_uncertainty:.4f}, Gripper: {gripper_uncertainty:.4f}. 请求专家标注...")
+                        
+                        # 构建当前状态字典供专家使用
+                        current_state = {
+                            'position': geometry_features.cpu().numpy().flatten().tolist(),
+                            'vision_features': vision_features.cpu().numpy().flatten().tolist(),
+                            'tactile_features': tactile_features.cpu().numpy().flatten().tolist(),
+                            'classification_logits': classification_logits.cpu().numpy().flatten().tolist()
+                        }
+                        
+                        expert_action = expert.get_label(current_state)
+                        expert_actions.append(expert_action.cpu().numpy())
+                        expert_requests += 1
+                        
+                        # 使用专家动作进行训练，但执行机器人动作
+                        final_action = robot_action
+                    else:
+                        # 不确定性较低，机器人自主决策
+                        expert_actions.append(None)  # 标记为无专家标注
+                        final_action = robot_action
+                    
+                    # 记录不确定性分数
+                    uncertainty_scores.append({
+                        'arm_uncertainty': arm_uncertainty,
+                        'gripper_uncertainty': gripper_uncertainty,
+                        'total_uncertainty': arm_uncertainty + gripper_uncertainty
+                    })
+                    
+                    # 更新隐藏状态（使用机器人动作）
+                    _, hidden_state = policy_model.predict_step(state_vector, hidden_state)
+                    
+                else:
+                    # 传统DAgger：每次都请求专家标注
+                    predicted_action, hidden_state = policy_model.predict_step(
+                        state_vector, hidden_state
+                    )
+                    
+                    # 构建当前状态字典供专家使用
+                    current_state = {
+                        'position': geometry_features.cpu().numpy().flatten().tolist(),
+                        'vision_features': vision_features.cpu().numpy().flatten().tolist(),
+                        'tactile_features': tactile_features.cpu().numpy().flatten().tolist(),
+                        'classification_logits': classification_logits.cpu().numpy().flatten().tolist()
+                    }
+                    
+                    expert_action = expert.get_label(current_state)
+                    expert_actions.append(expert_action.cpu().numpy())
+                    expert_requests += 1
+                    
+                    final_action = predicted_action
+                    uncertainty_scores.append(None)  # 传统模式下无不确定性分数
+                # --- 新增/修改 End ---
                 
                 # 应用动作约束
                 action_constraints = {
                     'velocity_limit': config.get('robot_params', {}).get('velocity_limit', 0.1)
                 }
                 constrained_action = policy_model.apply_action_constraints(
-                    predicted_action, action_constraints
+                    final_action, action_constraints
                 )
                 
                 actions.append(constrained_action.cpu().numpy())
+                total_steps += 1
                 
                 # 执行动作（在实际机器人上）
                 # 这里需要将动作发送给机器人
@@ -419,28 +503,43 @@ def collect_policy_rollouts(
                 'episode_id': episode,
                 'states': states,
                 'actions': actions,
+                'expert_actions': expert_actions,  # 新增：专家动作
+                'uncertainty_scores': uncertainty_scores,  # 新增：不确定性分数
                 'length': len(states)
             })
+    
+    # --- 新增/修改 Start ---
+    # 打印主动学习统计信息
+    if active_learning_enabled:
+        expert_request_rate = expert_requests / max(total_steps, 1) * 100
+        print(f"\n📊 主动学习统计:")
+        print(f"   总步数: {total_steps}")
+        print(f"   专家请求次数: {expert_requests}")
+        print(f"   专家请求率: {expert_request_rate:.2f}%")
+        print(f"   节省标注: {total_steps - expert_requests} 步")
+    # --- 新增/修改 End ---
     
     return rollouts
 
 
 def run_dagger_iteration(
     policy_model: PolicyModel,
-    representation_model: RepresentationModel,
+    representation_model: HybridRepresentationModel,
     classifier: ObjectClassifier,
+    expert: Any,
     robot_interface: RobotInterface,
     config: dict,
     iteration: int,
     logger: logging.Logger
 ) -> List[Dict[str, Any]]:
     """
-    运行一次DAgger迭代
+    运行一次DAgger迭代（集成主动学习）
     
     Args:
         policy_model: 策略模型
         representation_model: 表征模型
         classifier: 分类器模型
+        expert: 专家接口
         robot_interface: 机器人接口
         config: 配置
         iteration: 迭代次数
@@ -454,10 +553,10 @@ def run_dagger_iteration(
     
     logger.info(f"Starting DAgger iteration {iteration}")
     
-    # 1. 使用当前策略收集轨迹
+    # 1. 使用当前策略收集轨迹（集成主动学习）
     logger.info("Collecting policy rollouts...")
     rollouts = collect_policy_rollouts(
-        policy_model, robot_interface, representation_model, classifier,
+        policy_model, robot_interface, representation_model, classifier, expert,
         config, episodes_per_iteration
     )
     
@@ -565,6 +664,12 @@ def main():
     logger.info("Loading classifier model...")
     classifier = create_classifier_model(config, device)
     
+    # --- 新增/修改 Start ---
+    # 创建专家接口
+    logger.info("Creating expert interface...")
+    expert = ExpertFactory.create_expert(config)
+    # --- 新增/修改 End ---
+    
     # 创建策略模型
     logger.info("Creating policy model...")
     policy_model = create_policy_model(config, device)
@@ -625,7 +730,7 @@ def main():
         # 如果不是第一次迭代且有机器人接口，收集新数据
         if iteration > 0 and robot_interface is not None:
             new_data = run_dagger_iteration(
-                policy_model, representation_model, classifier, robot_interface,
+                policy_model, representation_model, classifier, expert, robot_interface,
                 config, iteration, logger
             )
             aggregated_data.extend(new_data)
