@@ -24,7 +24,7 @@ from typing import Dict, List, Any
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from models.policy_model import PolicyModel, DAggerTrainer
-from models.representation_model import HybridRepresentationModel
+from models.representation_model import RepresentationModel
 from models.classifier import ObjectClassifier
 from data_loader.dataset import PolicyDataset
 from data_loader.samplers import DAggerSampler
@@ -74,13 +74,13 @@ def load_config(config_path: str) -> dict:
     return config
 
 
-def create_representation_model(config: dict, device: torch.device) -> HybridRepresentationModel:
+def create_representation_model(config: dict, device: torch.device) -> RepresentationModel:
     """创建并加载表征模型"""
     model_config = config['model_params']
     rep_config = model_config['representation_model']
     
-    # 创建混合式表征模型
-    rep_model = HybridRepresentationModel(
+    # 创建表征模型（纯CLIP变体）
+    rep_model = RepresentationModel(
         vision_encoder_weights_path=None,  # 稍后从检查点加载
         embed_dim=128  # 使用默认值，稍后从检查点加载
     )
@@ -315,7 +315,7 @@ def expert_policy_function(state: np.ndarray) -> np.ndarray:
 def collect_policy_rollouts(
     policy_model: PolicyModel,
     robot_interface: RobotInterface,
-    representation_model: HybridRepresentationModel,
+    representation_model: RepresentationModel,
     classifier: ObjectClassifier,
     expert: Any,
     config: dict,
@@ -524,7 +524,7 @@ def collect_policy_rollouts(
 
 def run_dagger_iteration(
     policy_model: PolicyModel,
-    representation_model: HybridRepresentationModel,
+    representation_model: RepresentationModel,
     classifier: ObjectClassifier,
     expert: Any,
     robot_interface: RobotInterface,

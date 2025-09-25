@@ -21,13 +21,13 @@ from datetime import datetime
 # 添加项目根目录到Python路径
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from models.representation_model import HybridRepresentationModel
+from models.representation_model import RepresentationModel
 from data_loader.dataset import RepresentationDataset
 from data_loader.augmentations import get_vision_transforms, get_tactile_transforms
 from data_loader.samplers import BalancedBatchSampler
 from engine.trainer import train_representation_epoch
 from engine.evaluator import evaluate_representation_epoch
-from engine.losses import InfoNCELoss, HybridLoss
+from engine.losses import InfoNCELoss
 
 
 def setup_logging(log_dir: str) -> logging.Logger:
@@ -168,8 +168,8 @@ def create_model(config: dict, device: torch.device) -> nn.Module:
     """创建模型"""
     model_config = config['model_params']
     
-    # 创建混合式表征模型
-    model = HybridRepresentationModel(
+    # 创建表征模型（纯CLIP变体）
+    model = RepresentationModel(
         # 视觉编码器参数
         vision_encoder_weights_path=model_config['vision_encoder'].get('pretrained_weights_path'),
         vision_model_name=model_config['vision_encoder']['model_name'],
@@ -248,19 +248,14 @@ def create_optimizer_and_scheduler(model: nn.Module, config: dict) -> tuple:
 
 
 def create_loss_function(config: dict, device: torch.device) -> nn.Module:
-    """创建损失函数（支持HybridLoss）"""
+    """创建损失函数（纯CLIP变体）"""
     loss_config = config['loss_params']
-    multi_task_cfg = config.get('multi_task_params', None)
-
-    if multi_task_cfg is not None:
-        alpha = float(multi_task_cfg.get('alpha', 0.5))
-        temperature = float(loss_config.get('temperature', 0.07))
-        loss_fn = HybridLoss(alpha=alpha, temperature=temperature)
-    else:
-        loss_fn = InfoNCELoss(
-            temperature=loss_config.get('temperature', 0.07),
-            reduction='mean'
-        )
+    
+    # 纯CLIP变体：只使用InfoNCE损失
+    loss_fn = InfoNCELoss(
+        temperature=loss_config.get('temperature', 0.07),
+        reduction='mean'
+    )
     
     return loss_fn.to(device)
 

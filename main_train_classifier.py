@@ -22,7 +22,7 @@ from sklearn.metrics import accuracy_score, precision_recall_fscore_support, con
 # 添加项目根目录到Python路径
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from models.representation_model import HybridRepresentationModel
+from models.representation_model import RepresentationModel
 from models.classifier import ObjectClassifier
 from data_loader.dataset import ClassificationDataset
 from data_loader.augmentations import get_vision_transforms, get_tactile_transforms
@@ -151,8 +151,8 @@ def create_models(config: dict, device: torch.device) -> tuple:
     """创建表征模型和分类器"""
     model_config = config['model_params']
     
-    # 创建混合式表征模型（冻结）
-    representation_model = HybridRepresentationModel(
+    # 创建表征模型（冻结）
+    representation_model = RepresentationModel(
         # 视觉编码器参数
         vision_encoder_weights_path=model_config.get('representation_model_checkpoint'),
         vision_model_name='vit_base_patch16_224',

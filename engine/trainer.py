@@ -276,30 +276,24 @@ def train_representation_epoch(
     **kwargs
 ) -> Dict[str, float]:
     """
-    表征学习专用的训练函数
+    表征学习专用的训练函数（纯CLIP变体）
     """
     def custom_forward_fn(model, batch_data):
         if isinstance(batch_data, (list, tuple)) and len(batch_data) >= 2:
             vision_data, tactile_data = batch_data[0], batch_data[1]
-            # 返回四元组，包含触觉GT，供自定义损失函数使用
-            vision_emb, tactile_emb, pred_tactile = model(vision_data, tactile_data)
-            return vision_emb, tactile_emb, pred_tactile, tactile_data
+            # 纯CLIP变体：只返回视觉和触觉嵌入
+            vision_emb, tactile_emb = model(vision_data, tactile_data)
+            return vision_emb, tactile_emb
         else:
             raise ValueError("Expected batch_data to contain vision and tactile data")
 
-    # 自定义损失计算以支持HybridLoss(四个输入)或InfoNCE(两个输入)
-    original_loss_fn = loss_fn
-
     def custom_loss_fn(model_output, **loss_kwargs):
-        if isinstance(model_output, (list, tuple)):
-            if len(model_output) == 4:
-                v_emb, t_emb, pred_tactile, tactile_gt = model_output
-                return original_loss_fn(v_emb, t_emb, pred_tactile, tactile_gt)
-            elif len(model_output) == 2:
-                v_emb, t_emb = model_output
-                return original_loss_fn(v_emb, t_emb)
+        # 纯CLIP变体：只使用InfoNCE损失
+        if isinstance(model_output, (list, tuple)) and len(model_output) == 2:
+            v_emb, t_emb = model_output
+            return loss_fn(v_emb, t_emb)
         # 回退：直接传入
-        return original_loss_fn(model_output)
+        return loss_fn(model_output)
 
     return train_one_epoch(
         model=model,

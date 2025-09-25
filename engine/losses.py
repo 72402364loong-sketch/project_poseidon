@@ -376,38 +376,3 @@ class TripletLoss(nn.Module):
             return loss.sum()
         else:
             return loss
-
-
-class HybridLoss(nn.Module):
-    """
-    混合损失：InfoNCE对比损失 + 触觉序列预测MSE损失
-    使用 alpha 控制两者权重。
-    """
-    def __init__(self, alpha: float = 0.5, temperature: float = 0.07):
-        super(HybridLoss, self).__init__()
-        if not (0.0 <= alpha <= 1.0):
-            raise ValueError("alpha must be in [0, 1]")
-        self.alpha = alpha
-        self.contrastive_loss = InfoNCELoss(temperature=temperature, reduction='mean')
-        self.prediction_loss = nn.MSELoss(reduction='mean')
-
-    def forward(
-        self,
-        vision_embeddings: torch.Tensor,
-        tactile_embeddings: torch.Tensor,
-        predicted_tactile_sequence: torch.Tensor,
-        ground_truth_tactile_sequence: torch.Tensor
-    ) -> Tuple[torch.Tensor, dict]:
-        # 对比损失
-        loss_infonce = self.contrastive_loss(vision_embeddings, tactile_embeddings)
-        # 预测损失
-        loss_mse = self.prediction_loss(predicted_tactile_sequence, ground_truth_tactile_sequence)
-        # 总损失
-        total_loss = self.alpha * loss_infonce + (1.0 - self.alpha) * loss_mse
-
-        loss_dict = {
-            'total_loss': total_loss.item(),
-            'loss_infonce': loss_infonce.item(),
-            'loss_mse': loss_mse.item()
-        }
-        return total_loss, loss_dict
