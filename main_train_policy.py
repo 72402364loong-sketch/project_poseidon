@@ -390,7 +390,7 @@ def collect_policy_rollouts(
                 tactile_tensor = torch.from_numpy(tactile_data.data).float().unsqueeze(0).unsqueeze(0).to(device)
                 
                 # 通过表征模型提取特征
-                vision_features, tactile_features, _ = representation_model(vision_tensor, tactile_tensor)
+                vision_features, tactile_features = representation_model(vision_tensor, tactile_tensor)
                 
                 # 通过分类器获取分类特征
                 with torch.no_grad():

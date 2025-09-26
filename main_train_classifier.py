@@ -266,7 +266,7 @@ def custom_forward_fn(representation_model, classifier, batch_data):
     
     # 使用表征模型提取特征（不计算梯度）
     with torch.no_grad():
-        vision_emb, tactile_emb, _ = representation_model(vision_data, tactile_data)
+        vision_emb, tactile_emb = representation_model(vision_data, tactile_data)
     
     # 拼接特征
     features = torch.cat([vision_emb, tactile_emb], dim=1)

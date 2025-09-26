@@ -613,7 +613,7 @@ def evaluate_classification_epoch(
             # 前向传播
             with torch.cuda.amp.autocast():
                 # 使用表征模型提取特征
-                vision_emb, tactile_emb, _ = representation_model(vision_data, tactile_data)
+                vision_emb, tactile_emb = representation_model(vision_data, tactile_data)
                 
                 # 拼接特征
                 features = torch.cat([vision_emb, tactile_emb], dim=1)
