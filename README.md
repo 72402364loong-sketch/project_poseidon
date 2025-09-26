@@ -1,6 +1,6 @@
-# Project Poseidon v2.0
+# Project Poseidon v3.0
 
-**基于CLIP变体与迭代模仿学习的视觉-触觉融合机器人操控系统**
+**基于纯CLIP变体的视觉-触觉融合机器人操控系统**
 
 ## 🌊 项目概述
 
@@ -10,14 +10,15 @@ Project Poseidon 是一个先进的机器人感知与控制系统，专门设计
 
 - **多模态融合**: 视觉-触觉深度融合，提供鲁棒的感知能力
 - **水下适应**: 专门针对水下环境的视觉领域适应
-- **对比学习**: 基于CLIP思想的多模态表征学习
+- **纯对比学习**: 基于CLIP思想的InfoNCE损失多模态表征学习
 - **迭代学习**: DAgger算法解决分布偏移问题
 - **记忆机制**: LSTM处理时序信息和历史状态
 - **实时控制**: 高精度时间戳同步和实时力反馈
+- **分类器训练**: 基于预训练表征的物体分类器
 
 ## 🏗️ 系统架构
 
-项目采用"三阶段分层学习"框架：
+项目采用"四阶段分层学习"框架：
 
 ### 阶段 0.5: 视觉领域适应 (Vision Domain Adaptation)
 - 使用 ViT (Vision Transformer) 进行水下视觉领域适应
@@ -27,8 +28,15 @@ Project Poseidon 是一个先进的机器人感知与控制系统，专门设计
 ### 阶段 1: 多模态表征学习 (Multimodal Representation Learning)
 - **视觉流**: 双目图像水平拼接后输入ViT，隐式学习深度信息
 - **触觉流**: 18传感器×3轴=54维特征，100时间步序列，使用Transformer编码器
-- **对比学习**: 基于InfoNCE损失和BalancedBatchSampler的CLIP变体学习
+- **纯对比学习**: 基于InfoNCE损失的CLIP变体学习，无多任务学习
 - **投影头**: 将768维特征投影到128维共享嵌入空间
+- **表征模型**: 简化的RepresentationModel，只包含视觉和触觉编码器
+
+### 阶段 1.5: 物体分类器训练 (Object Classifier Training)
+- **预训练表征**: 使用阶段1训练好的表征模型提取特征
+- **分类器网络**: 简单的MLP分类器，输入为拼接的视觉+触觉特征
+- **冻结表征**: 表征模型参数冻结，只训练分类器
+- **交叉熵损失**: 标准的分类损失函数
 
 ### 阶段 2: 动态策略学习 (Dynamic Policy Learning)
 - **状态融合**: 语义特征 + 触觉特征 + 几何特征(3D坐标)
@@ -53,7 +61,8 @@ project_poseidon/
 ├── models/                           # 模型定义
 │   ├── vision_encoder.py             # ViT视觉编码器
 │   ├── tactile_encoder.py            # Transformer触觉编码器
-│   ├── representation_model.py       # 多模态表征模型
+│   ├── representation_model.py       # 纯CLIP变体表征模型
+│   ├── classifier.py                 # 物体分类器
 │   └── policy_model.py               # LSTM策略模型
 │
 ├── engine/                           # 训练引擎
@@ -66,6 +75,7 @@ project_poseidon/
 │
 ├── main_finetune_vision_on_urpc.py   # 阶段0.5主脚本
 ├── main_train_representation.py      # 阶段1主脚本
+├── main_train_classifier.py          # 分类器训练脚本
 ├── main_train_policy.py              # 阶段2主脚本
 ├── run_robot_demo.py                 # 机器人演示脚本
 └── requirements.txt                  # 依赖包列表
@@ -113,6 +123,12 @@ python main_finetune_vision_on_urpc.py --config configs/stage0_vision_finetune.y
 
 ```bash
 python main_train_representation.py --config configs/stage1_representation.yaml
+```
+
+#### 阶段 1.5: 物体分类器训练
+
+```bash
+python main_train_classifier.py --config configs/stage1_classifier.yaml
 ```
 
 #### 阶段 2: 动态策略学习
@@ -180,6 +196,11 @@ python run_robot_demo.py --config configs/robot_demo.yaml --task screw_tightenin
 - **检索准确率**: Recall@1, Recall@5
 - **对比准确率**: 视觉-触觉匹配精度
 
+### 分类器指标
+- **分类准确率**: Top-1, Top-5准确率
+- **交叉熵损失**: 分类损失
+- **混淆矩阵**: 各类别分类性能
+
 ### 策略学习指标  
 - **动作精度**: MSE, MAE
 - **轨迹平滑度**: 动作变化率
@@ -209,10 +230,11 @@ python run_robot_demo.py --config configs/robot_demo.yaml --task screw_tightenin
 ## 🔬 技术创新点
 
 1. **水下环境特化**: 首个专门针对水下环境的视触融合系统
-2. **分层学习架构**: 三阶段渐进式学习，可解释性强
-3. **CLIP变体应用**: 创新性地将对比学习引入视触融合
-4. **DAgger迭代学习**: 主动学习解决分布偏移问题
-5. **实时同步系统**: 高精度多传感器时间同步
+2. **分层学习架构**: 四阶段渐进式学习，可解释性强
+3. **纯CLIP变体**: 简化的对比学习架构，专注于视觉-触觉对齐
+4. **分类器训练**: 基于预训练表征的物体分类器
+5. **DAgger迭代学习**: 主动学习解决分布偏移问题
+6. **实时同步系统**: 高精度多传感器时间同步
 
 ## 📚 相关论文
 
