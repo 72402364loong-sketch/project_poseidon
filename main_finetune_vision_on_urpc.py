@@ -23,6 +23,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from models.vision_encoder import ViTEncoder
 from data_loader.dataset import URPCDataset
+from data_loader.vision_adaptation_dataset import URPCVisionAdaptationDataset
 from data_loader.augmentations import get_vision_transforms
 from engine.trainer import train_one_epoch
 from engine.evaluator import evaluate_one_epoch
@@ -73,6 +74,10 @@ def create_datasets(config: dict) -> tuple:
     data_config = config['data_params']
     aug_config = config.get('augmentation_params', {})
     
+    # 检查是否使用视觉适应模式
+    use_vision_adaptation = data_config.get('ignore_labels', False)
+    use_all_splits = data_config.get('use_all_splits_for_training', False)
+    
     # 训练集变换
     train_transforms = get_vision_transforms(
         config=aug_config,
@@ -87,18 +92,36 @@ def create_datasets(config: dict) -> tuple:
         underwater_augmentation=False
     )
     
-    # 创建数据集
-    train_dataset = URPCDataset(
-        data_path=data_config['urpc_dataset_path'],
-        split='train',
-        transform=train_transforms
-    )
-    
-    val_dataset = URPCDataset(
-        data_path=data_config['urpc_dataset_path'],
-        split='val',
-        transform=val_transforms
-    )
+    if use_vision_adaptation:
+        # 使用视觉适应数据集
+        print("Using Vision Adaptation Dataset (ignoring labels)")
+        train_dataset = URPCVisionAdaptationDataset(
+            data_path=data_config['urpc_dataset_path'],
+            split='all' if use_all_splits else 'train',
+            transform=train_transforms,
+            use_all_splits=use_all_splits
+        )
+        
+        # 验证集使用一小部分数据
+        val_dataset = URPCVisionAdaptationDataset(
+            data_path=data_config['urpc_dataset_path'],
+            split='val',
+            transform=val_transforms,
+            use_all_splits=False
+        )
+    else:
+        # 使用原始URPC数据集（带标签）
+        train_dataset = URPCDataset(
+            data_path=data_config['urpc_dataset_path'],
+            split='train',
+            transform=train_transforms
+        )
+        
+        val_dataset = URPCDataset(
+            data_path=data_config['urpc_dataset_path'],
+            split='val',
+            transform=val_transforms
+        )
     
     return train_dataset, val_dataset
 

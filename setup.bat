@@ -1,83 +1,84 @@
 @echo off
-REM Project Poseidon v3.0 Windows 环境配置脚本
+chcp 65001 >nul
+REM Project Poseidon v3.0 Windows Environment Setup Script
 
-echo 🚀 Project Poseidon v3.0 环境配置
+echo Project Poseidon v3.0 Environment Setup
 echo ================================================
 
-REM 检查Python是否安装
+REM Check if Python is installed
 python --version >nul 2>&1
 if errorlevel 1 (
-    echo ❌ Python未安装或未添加到PATH
-    echo 请先安装Python 3.8或更高版本
+    echo Python is not installed or not in PATH
+    echo Please install Python 3.8 or higher
     pause
     exit /b 1
 )
 
-echo ✅ Python已安装
+echo Python is installed
 python --version
 
-REM 创建虚拟环境
+REM Create virtual environment
 echo.
-echo 📦 创建虚拟环境...
+echo Creating virtual environment...
 if exist poseidon_env (
-    echo 虚拟环境已存在，跳过创建
+    echo Virtual environment already exists, skipping creation
 ) else (
     python -m venv poseidon_env
     if errorlevel 1 (
-        echo ❌ 虚拟环境创建失败
+        echo Failed to create virtual environment
         pause
         exit /b 1
     )
-    echo ✅ 虚拟环境创建成功
+    echo Virtual environment created successfully
 )
 
-REM 激活虚拟环境
+REM Activate virtual environment
 echo.
-echo 🔄 激活虚拟环境...
+echo Activating virtual environment...
 call poseidon_env\Scripts\activate.bat
 if errorlevel 1 (
-    echo ❌ 虚拟环境激活失败
+    echo Failed to activate virtual environment
     pause
     exit /b 1
 )
 
-REM 升级pip
+REM Upgrade pip
 echo.
-echo ⬆️ 升级pip...
+echo Upgrading pip...
 python -m pip install --upgrade pip
 
-REM 安装PyTorch (CUDA版本)
+REM Install PyTorch (CUDA version)
 echo.
-echo 🔧 安装PyTorch...
-echo 尝试安装CUDA 11.8版本...
+echo Installing PyTorch...
+echo Trying CUDA 11.8 version...
 pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
 if errorlevel 1 (
-    echo ⚠️ CUDA 11.8版本安装失败，尝试CUDA 12.1版本...
+    echo CUDA 11.8 version failed, trying CUDA 12.1 version...
     pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
     if errorlevel 1 (
-        echo ⚠️ CUDA版本安装失败，尝试CPU版本...
+        echo CUDA version failed, trying CPU version...
         pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
         if errorlevel 1 (
-            echo ❌ PyTorch安装失败
+            echo PyTorch installation failed
             pause
             exit /b 1
         )
     )
 )
 
-REM 安装项目依赖
+REM Install project dependencies
 echo.
-echo 📦 安装项目依赖...
+echo Installing project dependencies...
 pip install -r requirements.txt
 if errorlevel 1 (
-    echo ❌ 项目依赖安装失败
+    echo Project dependencies installation failed
     pause
     exit /b 1
 )
 
-REM 创建目录
+REM Create directories
 echo.
-echo 📁 创建项目目录...
+echo Creating project directories...
 if not exist data mkdir data
 if not exist data\urpc mkdir data\urpc
 if not exist data\representation mkdir data\representation
@@ -88,33 +89,33 @@ if not exist outputs\logs mkdir outputs\logs
 if not exist outputs\checkpoints mkdir outputs\checkpoints
 if not exist outputs\results mkdir outputs\results
 
-REM 验证安装
+REM Verify installation
 echo.
-echo 🧪 验证安装...
-python -c "import torch; print('✅ PyTorch:', torch.__version__); print('✅ CUDA可用:', torch.cuda.is_available())"
+echo Verifying installation...
+python -c "import torch; print('PyTorch:', torch.__version__); print('CUDA available:', torch.cuda.is_available())"
 if errorlevel 1 (
-    echo ❌ PyTorch验证失败
+    echo PyTorch verification failed
     pause
     exit /b 1
 )
 
-python -c "from models.representation_model import RepresentationModel; print('✅ 项目模块导入成功')"
+python -c "from models.representation_model import RepresentationModel; print('Project modules imported successfully')"
 if errorlevel 1 (
-    echo ❌ 项目模块验证失败
+    echo Project modules verification failed
     pause
     exit /b 1
 )
 
 echo.
-echo 🎉 环境配置完成！
+echo Environment setup completed!
 echo.
-echo 下一步:
-echo 1. 准备数据集 (参考 SETUP_GUIDE.md)
-echo 2. 配置YAML文件
-echo 3. 开始训练:
+echo Next steps:
+echo 1. Prepare datasets (refer to SETUP_GUIDE.md)
+echo 2. Configure YAML files
+echo 3. Start training:
 echo    python main_finetune_vision_on_urpc.py --config configs/stage0_vision_finetune.yaml
 echo.
-echo 要激活虚拟环境，请运行:
+echo To activate virtual environment, run:
 echo    poseidon_env\Scripts\activate.bat
 echo.
 pause

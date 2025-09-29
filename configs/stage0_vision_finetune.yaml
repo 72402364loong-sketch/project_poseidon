@@ -9,6 +9,13 @@ data_params:
   batch_size: 32
   num_workers: 4
   pin_memory: true
+  # 视觉领域适应特殊参数
+  use_all_splits_for_training: true  # 使用所有划分进行训练
+  ignore_labels: true  # 忽略标签，只用于视觉适应
+  # URPC2020特定参数
+  split_mapping:
+    val: "valid"  # URPC使用valid而不是val
+    validation: "valid"
 
 # 模型参数
 model_params:
