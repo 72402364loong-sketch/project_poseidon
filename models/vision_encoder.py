@@ -37,11 +37,25 @@ class ViTEncoder(nn.Module):
         self.freeze_layers = freeze_layers
         
         # 加载预训练的ViT模型
-        self.vit = timm.create_model(
-            model_name,
-            pretrained=pretrained,
-            num_classes=num_classes if num_classes is not None else 0
-        )
+        try:
+            self.vit = timm.create_model(
+                model_name,
+                pretrained=pretrained,
+                num_classes=num_classes if num_classes is not None else 0
+            )
+        except Exception as e:
+            print(f"⚠️  网络连接失败，尝试使用本地缓存或离线模式: {e}")
+            # 尝试不使用预训练权重
+            if pretrained:
+                print("🔄 尝试不使用预训练权重加载模型...")
+                self.vit = timm.create_model(
+                    model_name,
+                    pretrained=False,
+                    num_classes=num_classes if num_classes is not None else 0
+                )
+                print("⚠️  警告：模型已加载但未使用预训练权重，性能可能受影响")
+            else:
+                raise e
         
         # 如果不需要分类，将head替换为Identity
         if num_classes is None:

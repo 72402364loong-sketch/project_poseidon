@@ -202,7 +202,7 @@ python -c "
 try:
     import torch
     import torchvision
-    import transformers
+    import timm
     import numpy as np
     import cv2
     import PIL
