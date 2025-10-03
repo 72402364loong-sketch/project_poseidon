@@ -1,0 +1,77 @@
+# Stage 0.5: Vision Domain Adaptation Configuration (Offline Mode)
+# 视觉领域适应阶段配置文件 - 离线模式
+
+# 数据参数
+data_params:
+  urpc_dataset_path: "data/urpc_dataset"  # URPC数据集路径
+  train_split: 0.8  # 训练集比例
+  val_split: 0.2    # 验证集比例
+  batch_size: 32
+  num_workers: 0  # Set to 0 to avoid multiprocessing issues on Windows
+  pin_memory: false
+  # 视觉领域适应特殊参数
+  use_all_splits_for_training: true  # 使用所有划分进行训练
+  ignore_labels: true  # 忽略标签，只用于视觉适应
+  # URPC2020特定参数
+  split_mapping:
+    val: "valid"  # URPC使用valid而不是val
+    validation: "valid"
+
+# 模型参数 - 离线模式配置
+model_params:
+  model_name: "vit_base_patch16_224"  # ViT模型名称
+  pretrained: false                   # 离线模式：不使用预训练权重
+  num_classes: 4                      # URPC数据集类别数(海参、海胆、扇贝、海星)
+  freeze_layers: 0                    # 离线模式：不冻结层，从头训练
+  
+# 训练参数 - 针对离线模式调整
+training_params:
+  epochs: 100                         # 增加训练轮数补偿无预训练权重
+  learning_rate: 0.001                # 提高学习率
+  weight_decay: 0.01
+  optimizer: "adamw"
+  warmup_epochs: 10                   # 增加预热轮数
+  
+# 学习率调度器参数
+scheduler_params:
+  type: "cosine"
+  T_max: 100                          # 匹配总训练轮数
+  eta_min: 0.000001
+
+# 数据增强参数 - 增强数据增强以提高泛化能力
+augmentation_params:
+  # 水下风格数据增强
+  underwater_style: true
+  resize: [224, 224]  # Ensure consistent image size
+  color_jitter:
+    brightness: 0.4                   # 增强亮度变化
+    contrast: 0.4                     # 增强对比度变化
+    saturation: 0.4                   # 增强饱和度变化
+    hue: 0.2                          # 增强色调变化
+  gaussian_blur:
+    kernel_size: 3
+    sigma: [0.1, 2.0]
+  random_rotation: 20                 # 增加旋转角度
+  random_horizontal_flip: 0.5
+  # 额外的数据增强
+  random_vertical_flip: 0.3           # 添加垂直翻转
+  random_crop: 0.8                    # 添加随机裁剪
+  # Normalization parameters for ImageNet pretrained models
+  normalize_mean: [0.485, 0.456, 0.406]
+  normalize_std: [0.229, 0.224, 0.225]
+  
+# 检查点参数
+checkpoint_params:
+  output_dir: "checkpoints/stage0_offline"
+  save_freq: 10  # 每10个epoch保存一次
+  save_best: true
+  
+# 日志参数
+logging_params:
+  log_freq: 10  # 每10个batch打印一次日志
+  tensorboard_dir: "logs/stage0_offline"
+  
+# 设备参数
+device_params:
+  use_cuda: true
+  mixed_precision: true  # 使用混合精度训练

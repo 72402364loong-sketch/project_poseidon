@@ -1,0 +1,70 @@
+# Stage 0.5: Vision Domain Adaptation Configuration
+# 视觉领域适应阶段配置文件
+
+# 数据参数
+data_params:
+  urpc_dataset_path: "data/urpc_dataset"  # URPC数据集路径
+  train_split: 0.8  # 训练集比例
+  val_split: 0.2    # 验证集比例
+  batch_size: 32
+  num_workers: 4
+  pin_memory: true
+  # 视觉领域适应特殊参数
+  use_all_splits_for_training: true  # 使用所有划分进行训练
+  ignore_labels: true  # 忽略标签，只用于视觉适应
+  # URPC2020特定参数
+  split_mapping:
+    val: "valid"  # URPC使用valid而不是val
+    validation: "valid"
+
+# 模型参数
+model_params:
+  model_name: "vit_base_patch16_224"  # ViT模型名称
+  pretrained: true                    # 使用ImageNet预训练权重
+  num_classes: 4                      # URPC数据集类别数(海参、海胆、扇贝、海星)
+  freeze_layers: 8                    # 冻结前8层Transformer Block
+  
+# 训练参数
+training_params:
+  epochs: 50
+  learning_rate: 1e-4
+  weight_decay: 0.01
+  optimizer: "adamw"
+  warmup_epochs: 5
+  
+# 学习率调度器参数
+scheduler_params:
+  type: "cosine"
+  T_max: 50
+  eta_min: 1e-6
+
+# 数据增强参数
+augmentation_params:
+  # 水下风格数据增强
+  underwater_style: true
+  color_jitter:
+    brightness: 0.3
+    contrast: 0.3
+    saturation: 0.3
+    hue: 0.1
+  gaussian_blur:
+    kernel_size: 3
+    sigma: [0.1, 2.0]
+  random_rotation: 15
+  random_horizontal_flip: 0.5
+  
+# 检查点参数
+checkpoint_params:
+  output_dir: "checkpoints/stage0_vision_finetune"
+  save_freq: 10  # 每10个epoch保存一次
+  save_best: true
+  
+# 日志参数
+logging_params:
+  log_freq: 10  # 每10个batch打印一次日志
+  tensorboard_dir: "logs/stage0_vision_finetune"
+  
+# 设备参数
+device_params:
+  use_cuda: true
+  mixed_precision: true  # 使用混合精度训练

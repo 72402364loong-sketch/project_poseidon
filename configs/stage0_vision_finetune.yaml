@@ -1,47 +1,48 @@
 # Stage 0.5: Vision Domain Adaptation Configuration
-# 视觉领域适应阶段配置文件
+# Vision domain adaptation stage configuration file
 
-# 数据参数
+# Data parameters
 data_params:
-  urpc_dataset_path: "data/urpc_dataset"  # URPC数据集路径
-  train_split: 0.8  # 训练集比例
-  val_split: 0.2    # 验证集比例
+  urpc_dataset_path: "data/urpc_dataset"  # URPC dataset path
+  train_split: 0.8  # Training set ratio
+  val_split: 0.2    # Validation set ratio
   batch_size: 32
-  num_workers: 4
-  pin_memory: true
-  # 视觉领域适应特殊参数
-  use_all_splits_for_training: true  # 使用所有划分进行训练
-  ignore_labels: true  # 忽略标签，只用于视觉适应
-  # URPC2020特定参数
+  num_workers: 0  # Set to 0 to avoid multiprocessing issues on Windows
+  pin_memory: false
+  # Vision domain adaptation special parameters
+  use_all_splits_for_training: false  # Use proper train/val split for supervised learning
+  ignore_labels: false  # Use real labels for supervised classification training
+  # URPC2020 specific parameters
   split_mapping:
-    val: "valid"  # URPC使用valid而不是val
+    val: "valid"  # URPC uses valid instead of val
     validation: "valid"
 
-# 模型参数
+# Model parameters
 model_params:
-  model_name: "vit_base_patch16_224"  # ViT模型名称
-  pretrained: true                    # 使用ImageNet预训练权重
-  num_classes: 4                      # URPC数据集类别数(海参、海胆、扇贝、海星)
-  freeze_layers: 8                    # 冻结前8层Transformer Block
+  model_name: "vit_base_patch16_224"  # ViT model name
+  pretrained: true                    # Use ImageNet pretrained weights
+  num_classes: 4                      # URPC dataset classes (holothurian, echinus, scallop, starfish)
+  freeze_layers: 8                    # Freeze first 8 Transformer blocks
   
-# 训练参数
+# Training parameters
 training_params:
   epochs: 50
-  learning_rate: 1e-4
+  learning_rate: 0.0001
   weight_decay: 0.01
   optimizer: "adamw"
   warmup_epochs: 5
   
-# 学习率调度器参数
+# Learning rate scheduler parameters
 scheduler_params:
   type: "cosine"
   T_max: 50
-  eta_min: 1e-6
+  eta_min: 0.000001
 
-# 数据增强参数
+# Data augmentation parameters
 augmentation_params:
-  # 水下风格数据增强
+  # Underwater style data augmentation
   underwater_style: true
+  resize: [224, 224]  # Ensure consistent image size
   color_jitter:
     brightness: 0.3
     contrast: 0.3
@@ -52,19 +53,36 @@ augmentation_params:
     sigma: [0.1, 2.0]
   random_rotation: 15
   random_horizontal_flip: 0.5
+  # Normalization parameters for ImageNet pretrained models
+  normalize_mean: [0.485, 0.456, 0.406]
+  normalize_std: [0.229, 0.224, 0.225]
   
-# 检查点参数
+  # Additional underwater-specific augmentations
+  underwater_effects:
+    blue_shift: true      # Simulate underwater light attenuation
+    underwater_blur: true # Simulate light scattering
+    contrast_reduction: true # Simulate visibility reduction
+    brightness_adjustment: true # Simulate different depth lighting
+    particle_noise: true  # Simulate suspended particles
+  
+# Checkpoint parameters
 checkpoint_params:
   output_dir: "checkpoints/stage0_vision_finetune"
-  save_freq: 10  # 每10个epoch保存一次
+  save_freq: 10  # Save every 10 epochs
   save_best: true
   
-# 日志参数
+# Logging parameters
 logging_params:
-  log_freq: 10  # 每10个batch打印一次日志
+  log_freq: 10  # Print log every 10 batches
   tensorboard_dir: "logs/stage0_vision_finetune"
   
-# 设备参数
+# Evaluation parameters
+evaluation_params:
+  eval_freq: 5  # Evaluate every 5 epochs
+  metrics: ["loss", "accuracy", "top5_accuracy"]
+  save_predictions: true  # Save prediction results for analysis
+  
+# Device parameters
 device_params:
   use_cuda: true
-  mixed_precision: true  # 使用混合精度训练
+  mixed_precision: true  # Use mixed precision training
